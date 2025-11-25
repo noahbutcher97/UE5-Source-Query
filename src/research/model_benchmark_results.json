@@ -1,0 +1,322 @@
+{
+  "models": [
+    {
+      "model_name": "all-MiniLM-L6-v2",
+      "model_path": "sentence-transformers/all-MiniLM-L6-v2",
+      "dimension": 384,
+      "load_time": 0.6966195999411866,
+      "encode_time_ms": 1.2991899973712862,
+      "test_results": [
+        {
+          "query": "struct FHitResult",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "class AActor",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "FVector struct",
+          "expected": [
+            "Vector.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "FHitResult members ImpactPoint",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "AActor properties",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "collision detection implementation",
+          "expected": [
+            "Collision",
+            "Physics"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "vehicle physics simulation",
+          "expected": [
+            "WheeledVehicle",
+            "ChaosVehicle"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "actor component lifecycle",
+          "expected": [
+            "ActorComponent.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "LineTraceSingleByChannel function",
+          "expected": [
+            "CollisionQueryParams",
+            "WorldCollision"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "GetActorLocation implementation",
+          "expected": [
+            "Actor.h",
+            "Actor.cpp"
+          ],
+          "embedding_norm": 1.0
+        }
+      ],
+      "description": "Current model - General purpose, 384 dims"
+    },
+    {
+      "model_name": "unixcoder-base",
+      "model_path": "microsoft/unixcoder-base",
+      "dimension": 768,
+      "load_time": 7.6914548999629915,
+      "encode_time_ms": 2.621570008341223,
+      "test_results": [
+        {
+          "query": "struct FHitResult",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "class AActor",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "FVector struct",
+          "expected": [
+            "Vector.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "FHitResult members ImpactPoint",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "AActor properties",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "collision detection implementation",
+          "expected": [
+            "Collision",
+            "Physics"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "vehicle physics simulation",
+          "expected": [
+            "WheeledVehicle",
+            "ChaosVehicle"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "actor component lifecycle",
+          "expected": [
+            "ActorComponent.h"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "LineTraceSingleByChannel function",
+          "expected": [
+            "CollisionQueryParams",
+            "WorldCollision"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "GetActorLocation implementation",
+          "expected": [
+            "Actor.h",
+            "Actor.cpp"
+          ],
+          "embedding_norm": 0.9999999403953552
+        }
+      ],
+      "description": "Code-specific, trained on CodeSearchNet, 768 dims"
+    },
+    {
+      "model_name": "codebert-base",
+      "model_path": "microsoft/codebert-base",
+      "dimension": 768,
+      "load_time": 13.185653799911961,
+      "encode_time_ms": 2.9908500029705465,
+      "test_results": [
+        {
+          "query": "struct FHitResult",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "class AActor",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "FVector struct",
+          "expected": [
+            "Vector.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "FHitResult members ImpactPoint",
+          "expected": [
+            "HitResult.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "AActor properties",
+          "expected": [
+            "Actor.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "collision detection implementation",
+          "expected": [
+            "Collision",
+            "Physics"
+          ],
+          "embedding_norm": 0.9999999403953552
+        },
+        {
+          "query": "vehicle physics simulation",
+          "expected": [
+            "WheeledVehicle",
+            "ChaosVehicle"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "actor component lifecycle",
+          "expected": [
+            "ActorComponent.h"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "LineTraceSingleByChannel function",
+          "expected": [
+            "CollisionQueryParams",
+            "WorldCollision"
+          ],
+          "embedding_norm": 1.0
+        },
+        {
+          "query": "GetActorLocation implementation",
+          "expected": [
+            "Actor.h",
+            "Actor.cpp"
+          ],
+          "embedding_norm": 0.9999999403953552
+        }
+      ],
+      "description": "Code-specific, BERT architecture, 768 dims"
+    }
+  ],
+  "test_queries": [
+    [
+      "struct FHitResult",
+      [
+        "HitResult.h"
+      ]
+    ],
+    [
+      "class AActor",
+      [
+        "Actor.h"
+      ]
+    ],
+    [
+      "FVector struct",
+      [
+        "Vector.h"
+      ]
+    ],
+    [
+      "FHitResult members ImpactPoint",
+      [
+        "HitResult.h"
+      ]
+    ],
+    [
+      "AActor properties",
+      [
+        "Actor.h"
+      ]
+    ],
+    [
+      "collision detection implementation",
+      [
+        "Collision",
+        "Physics"
+      ]
+    ],
+    [
+      "vehicle physics simulation",
+      [
+        "WheeledVehicle",
+        "ChaosVehicle"
+      ]
+    ],
+    [
+      "actor component lifecycle",
+      [
+        "ActorComponent.h"
+      ]
+    ],
+    [
+      "LineTraceSingleByChannel function",
+      [
+        "CollisionQueryParams",
+        "WorldCollision"
+      ]
+    ],
+    [
+      "GetActorLocation implementation",
+      [
+        "Actor.h",
+        "Actor.cpp"
+      ]
+    ]
+  ]
+}

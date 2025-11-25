@@ -25,8 +25,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Run the query engine with all passed arguments
-python "%TOOL_ROOT%src\core\query_engine.py" %*
+REM Run the hybrid query engine with all passed arguments
+python "%TOOL_ROOT%src\core\hybrid_query.py" %*
 set RESULT=%errorlevel%
 
 REM Deactivate and exit
