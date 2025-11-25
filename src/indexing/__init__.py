@@ -1,0 +1,1 @@
+"""Source indexing and embedding generation"""

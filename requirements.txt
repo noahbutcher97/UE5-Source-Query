@@ -1,0 +1,29 @@
+# UE5.3 Vector Search System - Python Dependencies
+
+# Core dependencies
+sentence-transformers>=2.2.0  # Semantic embedding model
+anthropic>=0.7.0              # Claude API client (optional for natural language answers)
+numpy>=1.24.0                 # Vector operations and storage
+python-dotenv>=1.0.0          # Environment variable management
+
+# Optional dependencies
+tqdm>=4.65.0                  # Progress bars for indexing (optional but recommended)
+
+# Installation:
+# 1. Create virtual environment:
+#    python -m venv .venv
+#
+# 2. Activate virtual environment:
+#    Windows: .venv\Scripts\activate.bat
+#    Linux/Mac: source .venv/bin/activate
+#
+# 3. Install dependencies:
+#    pip install -r requirements.txt
+#
+# 4. (Optional) Install in development mode:
+#    pip install -e .
+
+# Notes:
+# - sentence-transformers will download ~100MB model on first use
+# - Model cached in: %USERPROFILE%\.cache\torch\sentence_transformers
+# - Total venv size: ~500MB with dependencies
