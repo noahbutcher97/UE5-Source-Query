@@ -1,4 +1,4 @@
-import os, json, hashlib, time, argparse, subprocess
+import os, json, hashlib, time, argparse, subprocess, sys
 from pathlib import Path
 from typing import List, Optional
 import numpy as np
@@ -9,6 +9,9 @@ try:
     from tqdm import tqdm
 except ImportError:
     tqdm = None
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 
@@ -26,9 +29,28 @@ if os.getenv("INDEX_DOCS", "0") == "1":
     EXTENSIONS |= {".md", ".txt"}
 
 MAX_FILE_CHARS = 120_000
-CHUNK_SIZE = 1500
-CHUNK_OVERLAP = 200
+
+# Chunking configuration
+USE_SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "1") == "1"  # Default: ON
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000" if USE_SEMANTIC_CHUNKING else "1500"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 EMBED_BATCH = 32
+
+# Import semantic chunker if enabled
+if USE_SEMANTIC_CHUNKING:
+    try:
+        from utils.semantic_chunker import SemanticChunker
+        SEMANTIC_CHUNKER = SemanticChunker(
+            max_chunk_size=CHUNK_SIZE,
+            min_chunk_size=500,
+            overlap=CHUNK_OVERLAP
+        )
+    except ImportError:
+        print("Warning: Could not import SemanticChunker, falling back to character-based chunking")
+        USE_SEMANTIC_CHUNKING = False
+        SEMANTIC_CHUNKER = None
+else:
+    SEMANTIC_CHUNKER = None
 
 def sha256(s: str) -> str:
     import hashlib as _hl
@@ -56,9 +78,30 @@ def load_index_file(index_path: Path) -> List[Path]:
 def iter_source_files(root: Path) -> List[Path]:
     return [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in EXTENSIONS]
 
-def chunk_text(text: str) -> List[str]:
+def chunk_text(text: str, file_path: str = "") -> List[str]:
+    """
+    Chunk text using either semantic or character-based chunking.
+
+    Args:
+        text: Text to chunk
+        file_path: Optional file path for semantic chunking context
+
+    Returns:
+        List of text chunks
+    """
     if len(text) <= CHUNK_SIZE:
         return [text]
+
+    # Use semantic chunking if enabled and chunker is available
+    if USE_SEMANTIC_CHUNKING and SEMANTIC_CHUNKER is not None:
+        try:
+            return SEMANTIC_CHUNKER.chunk(text, file_path)
+        except Exception as e:
+            # Fall back to character-based on error
+            print(f"Warning: Semantic chunking failed for {file_path}: {e}")
+            pass
+
+    # Fallback: character-based chunking
     chunks = []
     step = CHUNK_SIZE - CHUNK_OVERLAP
     for start in range(0, len(text), step):
@@ -221,7 +264,7 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
         if len(raw) > MAX_FILE_CHARS:
             continue
         file_hash = sha256(raw)
-        chunks = chunk_text(raw)
+        chunks = chunk_text(raw, str(file))
         if incremental and not force and file_hash in cache and cache[file_hash]["count"] == len(chunks):
             if existing_embeddings is not None:
                 path_str = str(file)
