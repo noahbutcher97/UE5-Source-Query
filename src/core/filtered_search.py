@@ -50,7 +50,10 @@ class FilteredSearch:
         file_type: Optional[str] = None,  # 'header' or 'implementation'
         # Boosting
         boost_entities: Optional[List[str]] = None,
-        boost_macros: bool = False
+        boost_macros: bool = False,
+        # Logical compensation for poor models
+        use_logical_boosts: bool = True,
+        query_type: Optional[str] = None  # 'definition', 'hybrid', 'semantic'
     ) -> List[Dict]:
         """
         Search with filtering and relevance boosting.
@@ -87,6 +90,14 @@ class FilteredSearch:
                 scores,
                 boost_entities=boost_entities,
                 boost_macros=boost_macros
+            )
+
+        # Apply logical boosts (compensate for poor model)
+        if use_logical_boosts and boost_entities:
+            scores = self._apply_logical_boosts(
+                scores,
+                boost_entities=boost_entities,
+                query_type=query_type
             )
 
         # Filter scores to valid indices
@@ -192,6 +203,62 @@ class FilteredSearch:
                 )
                 if has_any_macro:
                     boost_factor *= 1.15  # 15% boost
+
+            boosted_scores[i] *= boost_factor
+
+        return boosted_scores
+
+    def _apply_logical_boosts(
+        self,
+        scores: np.ndarray,
+        boost_entities: Optional[List[str]],
+        query_type: Optional[str]
+    ) -> np.ndarray:
+        """
+        Apply logical/structural boosts to compensate for poor embedding model.
+
+        Uses file paths, header/impl distinction, and entity co-occurrence
+        to improve ranking without relying on semantic similarity.
+
+        Boosts:
+        1. File Path Matching: 3x if entity name appears in filename
+        2. Header Prioritization: 2.5x for .h files on definition queries
+        3. Entity Co-occurrence: 0.1x penalty if target entity not present
+        4. Multi-entity bonus: 1.3x for chunks with >3 entities (rich definitions)
+        """
+        if not self.is_enriched or not boost_entities:
+            return scores
+
+        boosted_scores = scores.copy()
+
+        for i, meta in enumerate(self.metadata):
+            boost_factor = 1.0
+
+            # 1. File Path Matching (3x boost)
+            for entity in boost_entities:
+                # Strip UE5 prefixes (F, U, A, E) to get base name
+                entity_base = entity.lstrip('FUAE')
+                path_lower = Path(meta['path']).name.lower()
+                if entity_base.lower() in path_lower:
+                    boost_factor *= 3.0
+                    break
+
+            # 2. Header Prioritization (for definition queries)
+            if query_type in ['definition', 'hybrid']:
+                if meta.get('is_header', False):
+                    boost_factor *= 2.5  # Headers contain definitions
+                elif meta.get('is_implementation', False):
+                    boost_factor *= 0.5  # Implementation less relevant for defs
+
+            # 3. Entity Co-occurrence (require entity presence)
+            entities = meta.get('entities', [])
+            has_target_entity = any(e in entities for e in boost_entities)
+            if not has_target_entity:
+                boost_factor *= 0.1  # Heavy penalty for missing target entity
+
+            # 4. Multi-entity bonus (rich definition area)
+            if len(entities) > 3:
+                boost_factor *= 1.3
 
             boosted_scores[i] *= boost_factor
 

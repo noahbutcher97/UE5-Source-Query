@@ -208,7 +208,8 @@ def _semantic_search(query: str, top_k: int, timing: dict, intent=None, **kwargs
             qvec,
             top_k=top_k,
             boost_entities=boost_entities,
-            boost_macros=True  # Boost UE5 macro chunks
+            boost_macros=True,  # Boost UE5 macro chunks
+            query_type=intent.query_type.value if intent else None  # Pass query type for header prioritization
         )
 
         # Convert FilteredSearch results to query_engine format
