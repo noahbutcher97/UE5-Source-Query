@@ -18,6 +18,7 @@ sys.path.insert(0, str(TOOL_ROOT / "src"))
 
 from core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
 from core.definition_extractor import DefinitionExtractor, DefinitionResult
+from core.filtered_search import FilteredSearch
 from core import query_engine
 
 
@@ -101,6 +102,7 @@ def hybrid_query(
             intent.enhanced_query,
             top_k=top_k,
             timing=timing,
+            intent=intent,  # Pass intent for entity boosting
             **kwargs
         )
         timing['semantic_search_s'] = time.perf_counter() - t2
@@ -123,6 +125,7 @@ def hybrid_query(
             intent.enhanced_query,
             top_k=top_k,
             timing=timing,
+            intent=intent,  # Pass intent for potential entity boosting
             **kwargs
         )
         timing['semantic_search_s'] = time.perf_counter() - t1
@@ -164,18 +167,66 @@ def _extract_definitions(intent) -> List[DefinitionResult]:
     return []
 
 
-def _semantic_search(query: str, top_k: int, timing: dict, **kwargs) -> List[Dict[str, Any]]:
-    """Perform semantic search using existing query_engine"""
-    # Use the existing query_engine module
+def _semantic_search(query: str, top_k: int, timing: dict, intent=None, **kwargs) -> List[Dict[str, Any]]:
+    """
+    Perform semantic search with optional filtered search and entity boosting.
+
+    If enriched metadata exists and intent has entity information,
+    uses FilteredSearch for relevance boosting.
+    """
+    # Load embeddings and metadata
     embeddings, meta = query_engine.load_store()
 
+    # Check for enriched metadata
+    enriched_meta_path = TOOL_ROOT / "data" / "vector_meta_enriched.json"
+    use_filtered_search = enriched_meta_path.exists()
+
+    if use_filtered_search:
+        enriched_meta = json.loads(enriched_meta_path.read_text())['items']
+        timing['using_filtered_search'] = True
+    else:
+        enriched_meta = meta
+        timing['using_filtered_search'] = False
+
+    # Encode query
     t0 = time.perf_counter()
     model = query_engine.get_model(kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL))
     qvec = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
     timing['embed_s'] = time.perf_counter() - t0
 
+    # Perform search
     t1 = time.perf_counter()
-    hits = query_engine.select(qvec, embeddings, meta, top_k)
+
+    if use_filtered_search and intent and intent.entity_name:
+        # Use FilteredSearch with entity boosting
+        search = FilteredSearch(embeddings, enriched_meta)
+
+        # Extract entity names for boosting
+        boost_entities = [intent.entity_name] if intent.entity_name else []
+
+        results = search.search(
+            qvec,
+            top_k=top_k,
+            boost_entities=boost_entities,
+            boost_macros=True  # Boost UE5 macro chunks
+        )
+
+        # Convert FilteredSearch results to query_engine format
+        hits = []
+        for r in results:
+            hits.append({
+                'path': r['path'],
+                'chunk_index': r['chunk_index'],
+                'total_chunks': r['total_chunks'],
+                'score': r['score'],
+                'boosted': True
+            })
+    else:
+        # Fall back to standard semantic search
+        hits = query_engine.select(qvec, embeddings, meta, top_k)
+        for hit in hits:
+            hit['boosted'] = False
+
     timing['select_s'] = time.perf_counter() - t1
 
     return hits
