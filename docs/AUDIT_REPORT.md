@@ -199,7 +199,7 @@ exit /b %RESULT%
 
 **Issue:** `.env` file contains plaintext API key
 ```
-ANTHROPIC_API_KEY=sk-ant-api03-********************************** (REDACTED)
+ANTHROPIC_API_KEY=sk-ant-api03-********************************** (REDACTED)********************************** (REDACTED)
 ```
 
 **Risks:**
