@@ -70,31 +70,11 @@ if not exist "config" mkdir "config"
 if not exist "data" mkdir "data"
 if not exist "logs" mkdir "logs"
 
-REM Copy Python source files using robocopy (more reliable)
-echo    - Copying core modules...
-robocopy "%SCRIPT_DIR%src\core" "src\core" *.py /NJH /NJS /NDL /NP >nul
-if errorlevel 8 (
-    echo [ERROR] Failed to copy core modules
+REM Use Python helper script for reliable cross-platform copying
+python "%SCRIPT_DIR%install_helper.py" "%SCRIPT_DIR%" "%CD%"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy source files
     exit /b 1
-)
-
-echo    - Copying indexing modules...
-robocopy "%SCRIPT_DIR%src\indexing" "src\indexing" *.py *.ps1 *.bat *.txt /NJH /NJS /NDL /NP >nul
-if errorlevel 8 (
-    echo [ERROR] Failed to copy indexing modules
-    exit /b 1
-)
-
-REM Copy root-level files
-echo    - Copying configuration files...
-copy /Y "%SCRIPT_DIR%ask.bat" "." >nul
-copy /Y "%SCRIPT_DIR%requirements.txt" "." >nul
-if exist "%SCRIPT_DIR%requirements-gpu.txt" copy /Y "%SCRIPT_DIR%requirements-gpu.txt" "." >nul
-copy /Y "%SCRIPT_DIR%src\__init__.py" "src\" >nul
-
-REM Copy .env template
-if exist "%SCRIPT_DIR%config\.env.template" (
-    copy /Y "%SCRIPT_DIR%config\.env.template" "config\" >nul
 )
 
 echo [3/7] Creating virtual environment...
