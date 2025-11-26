@@ -128,11 +128,9 @@ if !INSTALL_GPU!==1 (
 echo [7/7] Installation complete!
 echo.
 
-if !BUILD_INDEX!==1 (
-    echo Building vector index...
-    echo This may take 2-3 minutes with GPU or 30-40 minutes with CPU
-    echo.
-    .venv\Scripts\python.exe src\indexing\build_embeddings.py --dirs-file src\indexing\EngineDirs.txt --force --verbose
+REM Copy configure.bat if it exists
+if exist "%SCRIPT_DIR%configure.bat" (
+    xcopy /Y /Q "%SCRIPT_DIR%configure.bat" "." >nul
 )
 
 echo.
@@ -142,9 +140,32 @@ echo ====================================================================
 echo Location: %TARGET_DIR%
 echo.
 echo Next Steps:
-echo   1. Add your Anthropic API key to: config\.env
-echo   2. Build the vector index: ask.bat --build-index
-echo   3. Start querying: ask.bat "your question here"
+echo   1. Run configuration wizard: configure.bat (recommended)
+echo      OR manually edit: config\.env
+echo   2. Build the vector index
+echo   3. Start querying!
+echo.
+
+REM Ask if user wants to configure now
+set /p "RUN_CONFIG=Run configuration wizard now? (Y/n): "
+if /i "!RUN_CONFIG!"=="n" (
+    echo.
+    echo Configuration skipped. Run 'configure.bat' when ready.
+    echo.
+) else (
+    echo.
+    call configure.bat
+    goto :skip_manual_build
+)
+
+if !BUILD_INDEX!==1 (
+    echo Building vector index...
+    echo This may take 2-3 minutes with GPU or 30-40 minutes with CPU
+    echo.
+    .venv\Scripts\python.exe src\indexing\build_embeddings.py --dirs-file src\indexing\EngineDirs.txt --force --verbose
+)
+
+:skip_manual_build
 echo.
 echo Documentation: docs\Guides\UE5_ENGINE_SOURCE_QUERY_GUIDE.md
 echo ====================================================================
