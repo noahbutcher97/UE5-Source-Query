@@ -19,9 +19,12 @@ SCRIPT_DIR = Path(__file__).parent
 DEFAULT_ROOT = SCRIPT_DIR.parent
 INDEX_DEFAULT = SCRIPT_DIR / "ai_index" / "index.json"
 
-OUT_VECTORS = SCRIPT_DIR / "vector_store.npz"
-OUT_META = SCRIPT_DIR / "vector_meta.json"
-CACHE_FILE = SCRIPT_DIR / "vector_cache.json"
+# Output directory configuration - can be overridden via CLI or environment variable
+# Priority: CLI arg > ENV var > default (script dir)
+DEFAULT_OUTPUT_DIR = os.getenv("VECTOR_OUTPUT_DIR", str(SCRIPT_DIR))
+OUT_VECTORS = Path(DEFAULT_OUTPUT_DIR) / "vector_store.npz"
+OUT_META = Path(DEFAULT_OUTPUT_DIR) / "vector_meta.json"
+CACHE_FILE = Path(DEFAULT_OUTPUT_DIR) / "vector_cache.json"
 
 # Model configuration - can be overridden via environment variable
 DEFAULT_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
@@ -358,24 +361,36 @@ def save_cache(cache: dict) -> None:
 def embed_batches(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
     if not texts:
         return np.zeros((0, model.get_sentence_embedding_dimension()))
-    bar = tqdm(total=len(texts), desc="Embedding chunks", unit="chunk") if tqdm else None
+
+    # Get tokenizer to check/truncate text length
+    tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
+    max_seq_length = getattr(model, 'max_seq_length', 512)
+
+    # Pre-process texts to truncate if needed
+    processed_texts = []
+    for text in texts:
+        if tokenizer and len(tokenizer.tokenize(text)) > max_seq_length:
+            # Truncate at token level
+            tokens = tokenizer.tokenize(text)[:max_seq_length]
+            text = tokenizer.convert_tokens_to_string(tokens)
+        elif len(text) > max_seq_length * 4:  # Rough char estimate (avg 4 chars/token)
+            text = text[:max_seq_length * 4]
+        processed_texts.append(text)
+
+    bar = tqdm(total=len(processed_texts), desc="Embedding chunks", unit="chunk") if tqdm else None
     all_vecs = []
-    for i in range(0, len(texts), EMBED_BATCH):
-        batch = texts[i:i + EMBED_BATCH]
+    for i in range(0, len(processed_texts), EMBED_BATCH):
+        batch = processed_texts[i:i + EMBED_BATCH]
         try:
-            # Set max_seq_length to model's limit (512 for most transformers)
-            # truncate=True ensures oversized chunks are handled gracefully
             vecs = model.encode(
                 batch,
                 convert_to_numpy=True,
                 normalize_embeddings=True,
-                show_progress_bar=False,
-                truncate=True,  # Automatically truncate oversized chunks
-                max_length=512  # Explicit maximum sequence length
+                show_progress_bar=False
             )
             all_vecs.append(vecs)
-        except IndexError as e:
-            # Fallback: encode chunks one by one with truncation
+        except (IndexError, RuntimeError) as e:
+            # Fallback: encode chunks one by one
             print(f"\nWarning: Batch encoding failed at index {i}, encoding individually...")
             for text in batch:
                 try:
@@ -383,9 +398,7 @@ def embed_batches(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
                         [text],
                         convert_to_numpy=True,
                         normalize_embeddings=True,
-                        show_progress_bar=False,
-                        truncate=True,
-                        max_length=512
+                        show_progress_bar=False
                     )
                     all_vecs.append(vec)
                 except Exception as e2:
@@ -442,11 +455,23 @@ def _invoke_indexer(args_list: list[str], verbose: bool):
 def build(incremental: bool, force: bool, use_index: bool, index_path: Path, root: Path, auto_build_index: bool, verbose: bool,
           dirs: List[str] = None, dirs_file: str = None, extensions: set = None,
           exclude_patterns: List[str] = None, include_file_patterns: List[str] = None, exclude_file_patterns: List[str] = None,
+          output_dir: str = None,
           ps_root: str = "", ps_source_dirs: List[str] = None, ps_use_engine_dirs: bool = False, ps_output_dir: str = "",
           ps_include_extensions: List[str] = None, ps_exclude_dirs: List[str] = None,
           ps_max_file_bytes: int = 10*1024*1024, ps_preview_lines: int = 20, ps_force_index: bool = False,
           ps_serve_http: bool = False, ps_bind_host: str = "127.0.0.1", ps_port: int = 8008,
           ps_background_server: bool = False, ps_engine_dirs_file: str = "EngineDirs.txt") -> None:
+
+    # Configure output directory dynamically
+    global OUT_VECTORS, OUT_META, CACHE_FILE
+    if output_dir:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+        OUT_VECTORS = output_path / "vector_store.npz"
+        OUT_META = output_path / "vector_meta.json"
+        CACHE_FILE = output_path / "vector_cache.json"
+        if verbose:
+            print(f"Output directory: {output_path}")
 
     def build_args():
         args_list = []
@@ -668,6 +693,10 @@ def main() -> None:
     ap.add_argument("--no-indexignore", action="store_true",
                     help="Disable automatic .indexignore file loading")
 
+    # Output directory configuration
+    ap.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
+                    help=f"Directory for vector store output files (default: {DEFAULT_OUTPUT_DIR})")
+
     # Indexer pass-through (DEPRECATED - for backward compatibility only)
     ap.add_argument("--Root", default="", help="Primary root directory to scan.")
     ap.add_argument("--SourceDirs", action='append', default=[], help="Additional source directories to scan.")
@@ -739,6 +768,7 @@ def main() -> None:
           exclude_patterns=exclude_patterns,
           include_file_patterns=args.include_files,
           exclude_file_patterns=exclude_file_patterns,
+          output_dir=args.output_dir,
           ps_root=args.Root,
           ps_source_dirs=args.SourceDirs,
           ps_use_engine_dirs=args.UseEngineDirs,

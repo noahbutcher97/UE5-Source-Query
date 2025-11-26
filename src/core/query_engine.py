@@ -28,8 +28,13 @@ TOOL_ROOT = Path(__file__).parent.parent.parent  # Go up to D:\DevTools\UE5-Sour
 load_dotenv(dotenv_path=TOOL_ROOT / "config" / ".env", override=True)
 
 SCRIPT_DIR = Path(__file__).parent
-VECTORS = TOOL_ROOT / "data" / "vector_store.npz"
-META = TOOL_ROOT / "data" / "vector_meta.json"
+
+# Vector store location - can be overridden via environment variable
+# Priority: ENV var > default (TOOL_ROOT/data)
+DEFAULT_VECTOR_DIR = os.getenv("VECTOR_OUTPUT_DIR", str(TOOL_ROOT / "data"))
+VECTORS = Path(DEFAULT_VECTOR_DIR) / "vector_store.npz"
+META = Path(DEFAULT_VECTOR_DIR) / "vector_meta.json"
+
 DEFAULT_EMBED_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
 DEFAULT_API_MODEL = "claude-3-haiku-20240307"
 
