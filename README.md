@@ -13,6 +13,20 @@ ask.bat "how does collision detection work"
 ```
 
 ### For Developers (Main Repository)
+
+**IMPORTANT: First-time setup required:**
+```bash
+# 1. Run configuration wizard to create config/.env file
+configure.bat
+
+# 2. Verify installation
+python -c "import sentence_transformers; import anthropic; print('Dependencies OK')"
+
+# 3. Build vector index (if not already built)
+ask.bat --build-index
+```
+
+**Once configured, run queries:**
 ```bash
 # Basic queries
 python src/core/hybrid_query.py "struct FHitResult" --show-reasoning
