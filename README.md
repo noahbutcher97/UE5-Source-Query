@@ -55,7 +55,27 @@ install.bat "D:\YourProject" --gpu --build-index
 install.bat "D:\YourProject"
 ```
 
-**See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide**
+**See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete deployment guide**
+
+## Maintenance & Management
+
+### GUI Management Tool (Recommended)
+
+```bash
+manage.bat  # Launch graphical management interface
+```
+
+### Command-Line Tools
+
+| Command | Purpose |
+|---------|---------|
+| `update.bat [dir]` | Update installation with latest code |
+| `rebuild-index.bat [--force] [--verbose]` | Rebuild vector store |
+| `add-directory.bat <dir>` | Incrementally add directory to index |
+| `manage-directories.bat list/add/remove/rebuild` | Manage indexed directories |
+| `configure.bat` | Re-run configuration wizard |
+
+**See [docs/MAINTENANCE.md](docs/MAINTENANCE.md) for complete maintenance guide**
 
 ## Features
 
