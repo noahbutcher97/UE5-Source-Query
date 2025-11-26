@@ -22,7 +22,10 @@ INDEX_DEFAULT = SCRIPT_DIR / "ai_index" / "index.json"
 OUT_VECTORS = SCRIPT_DIR / "vector_store.npz"
 OUT_META = SCRIPT_DIR / "vector_meta.json"
 CACHE_FILE = SCRIPT_DIR / "vector_cache.json"
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Model configuration - can be overridden via environment variable
+DEFAULT_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
+MODEL_NAME = os.getenv("EMBED_MODEL", DEFAULT_MODEL)
 
 EXTENSIONS = {".cpp", ".h", ".hpp", ".inl", ".cs"}
 if os.getenv("INDEX_DOCS", "0") == "1":

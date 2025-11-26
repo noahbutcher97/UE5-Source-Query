@@ -30,7 +30,7 @@ load_dotenv(dotenv_path=TOOL_ROOT / "config" / ".env", override=True)
 SCRIPT_DIR = Path(__file__).parent
 VECTORS = TOOL_ROOT / "data" / "vector_store.npz"
 META = TOOL_ROOT / "data" / "vector_meta.json"
-DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_EMBED_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
 DEFAULT_API_MODEL = "claude-3-haiku-20240307"
 
 # Global model singleton (lazy)
