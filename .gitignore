@@ -11,6 +11,9 @@ data/vector_store.npz
 data/*_enriched.json
 data/vector_cache.json
 
+# Configuration (contains API keys)
+config/.env
+
 # IDE
 .vscode/
 .idea/
@@ -24,8 +27,10 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Temporary files
 *.tmp
 *.bak
-*.backupdata/archived/
+*.backup
+data/archived/

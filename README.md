@@ -4,6 +4,15 @@
 
 ## Quick Start
 
+### For End Users (Deployed Projects)
+```bash
+# Simple query interface
+ask.bat "your question here"
+ask.bat "FHitResult members" --copy
+ask.bat "how does collision detection work"
+```
+
+### For Developers (Main Repository)
 ```bash
 # Basic queries
 python src/core/hybrid_query.py "struct FHitResult" --show-reasoning
@@ -18,6 +27,21 @@ python src/core/definition_extractor.py enum ECollisionChannel
 # Fuzzy matching (typos)
 python src/core/definition_extractor.py struct HitRes --fuzzy
 ```
+
+## Deployment
+
+Deploy to new UE5 projects with automated installer:
+
+```bash
+# Quick deployment with GPU acceleration
+cd D:\DevTools\UE5-Source-Query
+install.bat "D:\YourProject" --gpu --build-index
+
+# CPU-only deployment
+install.bat "D:\YourProject"
+```
+
+**See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide**
 
 ## Features
 
