@@ -90,15 +90,18 @@ if errorlevel 1 (
 )
 
 echo [4/7] Installing Python dependencies...
+echo    - Upgrading pip...
+.venv\Scripts\python.exe -m pip install --upgrade pip --quiet
+
 if !INSTALL_GPU!==1 (
     echo    - Installing with GPU acceleration ^(CUDA 12.8^)...
-    .venv\Scripts\pip install --upgrade pip >nul
-    .venv\Scripts\pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 >nul
-    .venv\Scripts\pip install -r requirements.txt >nul
+    echo    - Downloading PyTorch with CUDA 12.8 ^(this may take several minutes^)...
+    .venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 --quiet
+    echo    - Installing other dependencies...
+    .venv\Scripts\python.exe -m pip install -r requirements.txt --quiet
 ) else (
     echo    - Installing CPU-only version...
-    .venv\Scripts\pip install --upgrade pip >nul
-    .venv\Scripts\pip install -r requirements.txt >nul
+    .venv\Scripts\python.exe -m pip install -r requirements.txt --quiet
 )
 
 if errorlevel 1 (
