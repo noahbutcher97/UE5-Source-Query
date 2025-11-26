@@ -1,0 +1,39 @@
+# UE5-Source-Query/.indexignore
+# Default exclusion patterns for indexing UE5 source code
+
+# Build artifacts
+Intermediate
+Binaries
+DerivedDataCache
+Saved
+
+# Third-party (pre-compiled code)
+ThirdParty
+
+# Platform-specific directories
+Build/Android
+Build/IOS
+Build/Linux
+Build/Mac
+
+# IDE and version control
+.vs
+.vscode
+.idea
+.git
+.hg
+.svn
+
+# Documentation and assets (non-code)
+Documentation
+Content
+Extras
+
+# Optional: Test files (uncomment to exclude)
+#*Test*.cpp
+#*Spec*.cpp
+#*Mock*.h
+
+# Optional: Generated files (uncomment to exclude)
+#*.generated.h
+#*.generated.cpp

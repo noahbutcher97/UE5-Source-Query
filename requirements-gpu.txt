@@ -1,0 +1,26 @@
+# UE5.3 Vector Search System - GPU-Accelerated Dependencies
+
+# GPU-accelerated PyTorch (CUDA 12.x compatible)
+--index-url https://download.pytorch.org/whl/cu124
+torch>=2.0.0
+
+# Core dependencies
+sentence-transformers>=2.2.0  # Semantic embedding model
+anthropic>=0.7.0              # Claude API client (optional for natural language answers)
+numpy>=1.24.0                 # Vector operations and storage
+python-dotenv>=1.0.0          # Environment variable management
+
+# Optional dependencies
+tqdm>=4.65.0                  # Progress bars for indexing (optional but recommended)
+
+# Installation for GPU acceleration:
+# 1. Ensure NVIDIA drivers and CUDA toolkit are installed
+# 2. Install dependencies:
+#    pip install -r requirements-gpu.txt
+#
+# Performance improvement:
+# - CPU-only: ~7-8 chunks/second
+# - GPU (RTX 5090): ~50-100+ chunks/second (estimated 6-10x speedup)
+#
+# Verify GPU is available:
+#    python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"

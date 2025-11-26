@@ -27,6 +27,10 @@ CACHE_FILE = SCRIPT_DIR / "vector_cache.json"
 DEFAULT_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
 MODEL_NAME = os.getenv("EMBED_MODEL", DEFAULT_MODEL)
 
+# GPU configuration
+USE_GPU = os.getenv("USE_GPU", "auto")  # auto, true, false
+GPU_DEVICE = None  # Will be set during model initialization
+
 EXTENSIONS = {".cpp", ".h", ".hpp", ".inl", ".cs"}
 if os.getenv("INDEX_DOCS", "0") == "1":
     EXTENSIONS |= {".md", ".txt"}
@@ -80,6 +84,221 @@ def load_index_file(index_path: Path) -> List[Path]:
 
 def iter_source_files(root: Path) -> List[Path]:
     return [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in EXTENSIONS]
+
+# ===== Modular File Discovery System =====
+
+# Default UE5 exclusion patterns
+DEFAULT_UE5_EXCLUDES = [
+    # Build artifacts
+    "Intermediate", "Binaries", "DerivedDataCache", "Saved",
+    # IDE files
+    ".vs", ".vscode", ".idea",
+    # Version control
+    ".git", ".hg", ".svn",
+    # Platform-specific
+    "Build/BatchFiles", "Build/Android", "Build/IOS", "Build/Linux", "Build/Mac",
+    # Third-party
+    "ThirdParty",
+    # Documentation/assets
+    "Documentation", "Content", "Extras"
+]
+
+def should_exclude_path(path: Path, exclude_patterns: List[str]) -> bool:
+    """
+    Check if any part of path matches exclusion patterns.
+    Uses path component matching (not substring).
+    """
+    path_parts = path.parts
+    return any(pattern in path_parts for pattern in exclude_patterns)
+
+def load_dirs_from_file(file_path: Path, verbose: bool = False) -> List[Path]:
+    """Load and validate directories from text file."""
+    if not file_path.exists():
+        return []
+
+    dirs = []
+    for line_num, line in enumerate(file_path.read_text(encoding='utf-8').splitlines(), 1):
+        line = line.strip()
+
+        # Skip comments and empty lines
+        if not line or line.startswith('#'):
+            continue
+
+        path = Path(line)
+        if path.exists() and path.is_dir():
+            dirs.append(path)
+        elif verbose:
+            print(f"Warning line {line_num}: Skipping invalid directory: {line}")
+
+    return dirs
+
+def load_exclusions_from_file(file_path: Path, verbose: bool = False) -> tuple:
+    """
+    Load exclusion patterns from .indexignore file.
+
+    Returns:
+        (dir_patterns, file_patterns) - Separate directory and file patterns
+    """
+    if not file_path.exists():
+        return [], []
+
+    dir_patterns = []
+    file_patterns = []
+
+    for line_num, line in enumerate(file_path.read_text(encoding='utf-8').splitlines(), 1):
+        line = line.strip()
+
+        # Skip comments and empty lines
+        if not line or line.startswith('#'):
+            continue
+
+        # Detect pattern type
+        if '*' in line or '?' in line or '[' in line:
+            # Glob pattern = file pattern
+            file_patterns.append(line)
+        else:
+            # Plain text = directory pattern
+            dir_patterns.append(line)
+
+        if verbose:
+            pattern_type = "file" if line in file_patterns else "directory"
+            print(f"  Loaded {pattern_type} exclusion: {line}")
+
+    return dir_patterns, file_patterns
+
+def load_all_indexignore_files(roots: List[Path], verbose: bool = False) -> tuple:
+    """
+    Load .indexignore files from multiple locations and merge.
+
+    Search order:
+    1. Current working directory
+    2. Each root directory
+    3. User home directory (~/.indexignore)
+    """
+    all_dir_patterns = []
+    all_file_patterns = []
+
+    # Check locations in order
+    locations = [
+        Path.cwd() / ".indexignore",    # Current directory
+        Path.home() / ".indexignore"    # User home
+    ]
+
+    # Add root directories
+    for root in roots:
+        locations.append(root / ".indexignore")
+
+    for location in locations:
+        if location.exists():
+            if verbose:
+                print(f"Loading exclusions from: {location}")
+
+            dir_pats, file_pats = load_exclusions_from_file(location, verbose)
+            all_dir_patterns.extend(dir_pats)
+            all_file_patterns.extend(file_pats)
+
+    return all_dir_patterns, all_file_patterns
+
+def matches_extension(file_path: Path, extensions: set) -> bool:
+    """Check if file extension is in allowed set."""
+    return file_path.suffix.lower() in extensions
+
+def matches_file_pattern(file_path: Path, include_patterns: List[str] = None,
+                        exclude_patterns: List[str] = None) -> bool:
+    """
+    Check if filename matches include/exclude patterns.
+    Uses fnmatch for glob patterns.
+
+    Priority: Exclusions override inclusions
+    """
+    from fnmatch import fnmatch
+
+    filename = file_path.name
+
+    # Check exclusions first (blacklist wins)
+    if exclude_patterns:
+        for pattern in exclude_patterns:
+            if fnmatch(filename, pattern):
+                return False
+
+    # Check inclusions (if specified, must match)
+    if include_patterns:
+        return any(fnmatch(filename, pattern) for pattern in include_patterns)
+
+    # No patterns = include by default
+    return True
+
+def passes_filters(file_path: Path, extensions: set, exclude_dirs: List[str],
+                  include_files: List[str] = None, exclude_files: List[str] = None) -> bool:
+    """
+    Complete filtering pipeline.
+    All filters must pass for file to be included.
+    """
+    # Layer 1: Extension filter
+    if not matches_extension(file_path, extensions):
+        return False
+
+    # Layer 2: Directory exclusion
+    if should_exclude_path(file_path, exclude_dirs):
+        return False
+
+    # Layer 3: File pattern filter
+    if not matches_file_pattern(file_path, include_files, exclude_files):
+        return False
+
+    return True
+
+def discover_source_files(roots: List[Path] = None, exclude_patterns: List[str] = None,
+                         extensions: set = None, include_file_patterns: List[str] = None,
+                         exclude_file_patterns: List[str] = None, verbose: bool = False) -> List[Path]:
+    """
+    Unified file discovery supporting all input methods.
+
+    Args:
+        roots: List of directories to scan recursively
+        exclude_patterns: Path patterns to exclude (e.g., ["Intermediate", "Binaries"])
+        extensions: File extensions to include (defaults to EXTENSIONS global)
+        include_file_patterns: Only include files matching these patterns (glob)
+        exclude_file_patterns: Exclude files matching these patterns (glob)
+        verbose: Print discovery progress
+
+    Returns:
+        Deduplicated, sorted list of source file paths
+    """
+    if extensions is None:
+        extensions = EXTENSIONS
+
+    if exclude_patterns is None:
+        exclude_patterns = []
+
+    if not roots:
+        return []
+
+    all_files = set()
+
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            if verbose:
+                print(f"Warning: Skipping non-existent directory: {root}")
+            continue
+
+        if verbose:
+            print(f"Scanning directory: {root}")
+
+        # Recursively find all files
+        for file_path in root.rglob("*"):
+            if not file_path.is_file():
+                continue
+
+            # Apply all filters
+            if passes_filters(file_path, extensions, exclude_patterns,
+                            include_file_patterns, exclude_file_patterns):
+                all_files.add(file_path)
+
+    # Return sorted, deduplicated list
+    return sorted(all_files)
+
+# ===== End Modular File Discovery System =====
 
 def chunk_text(text: str, file_path: str = "") -> List[str]:
     """
@@ -143,8 +362,37 @@ def embed_batches(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
     all_vecs = []
     for i in range(0, len(texts), EMBED_BATCH):
         batch = texts[i:i + EMBED_BATCH]
-        vecs = model.encode(batch, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
-        all_vecs.append(vecs)
+        try:
+            # Set max_seq_length to model's limit (512 for most transformers)
+            # truncate=True ensures oversized chunks are handled gracefully
+            vecs = model.encode(
+                batch,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                truncate=True,  # Automatically truncate oversized chunks
+                max_length=512  # Explicit maximum sequence length
+            )
+            all_vecs.append(vecs)
+        except IndexError as e:
+            # Fallback: encode chunks one by one with truncation
+            print(f"\nWarning: Batch encoding failed at index {i}, encoding individually...")
+            for text in batch:
+                try:
+                    vec = model.encode(
+                        [text],
+                        convert_to_numpy=True,
+                        normalize_embeddings=True,
+                        show_progress_bar=False,
+                        truncate=True,
+                        max_length=512
+                    )
+                    all_vecs.append(vec)
+                except Exception as e2:
+                    # Skip problematic chunk and use zero vector
+                    print(f"Error embedding chunk (skipping): {str(e2)[:100]}")
+                    zero_vec = np.zeros((1, model.get_sentence_embedding_dimension()))
+                    all_vecs.append(zero_vec)
         if bar: bar.update(len(batch))
     if bar: bar.close()
     return np.vstack(all_vecs)
@@ -192,9 +440,13 @@ def _invoke_indexer(args_list: list[str], verbose: bool):
         print("Index build output:\n", result.stdout.strip())
 
 def build(incremental: bool, force: bool, use_index: bool, index_path: Path, root: Path, auto_build_index: bool, verbose: bool,
-          ps_root: str, ps_source_dirs: List[str], ps_use_engine_dirs: bool, ps_output_dir: str, ps_include_extensions: List[str],
-          ps_exclude_dirs: List[str], ps_max_file_bytes: int, ps_preview_lines: int, ps_force_index: bool, ps_serve_http: bool,
-          ps_bind_host: str, ps_port: int, ps_background_server: bool, ps_engine_dirs_file: str) -> None:
+          dirs: List[str] = None, dirs_file: str = None, extensions: set = None,
+          exclude_patterns: List[str] = None, include_file_patterns: List[str] = None, exclude_file_patterns: List[str] = None,
+          ps_root: str = "", ps_source_dirs: List[str] = None, ps_use_engine_dirs: bool = False, ps_output_dir: str = "",
+          ps_include_extensions: List[str] = None, ps_exclude_dirs: List[str] = None,
+          ps_max_file_bytes: int = 10*1024*1024, ps_preview_lines: int = 20, ps_force_index: bool = False,
+          ps_serve_http: bool = False, ps_bind_host: str = "127.0.0.1", ps_port: int = 8008,
+          ps_background_server: bool = False, ps_engine_dirs_file: str = "EngineDirs.txt") -> None:
 
     def build_args():
         args_list = []
@@ -236,22 +488,88 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
                 print(("Building index..." if need_build else "Rebuilding stale index..."))
             _invoke_indexer(build_args(), verbose)
 
+    # Determine input mode and discover files
     if use_index:
+        # Mode 1: Use pre-built index (backward compatibility)
         files = load_index_file(index_path)
         if verbose:
-            print(f"Loaded {len(files)} files from index: {index_path}")
-    else:
-        files = iter_source_files(root)
+            print(f"Loaded {len(files)} files from index")
+
+    elif dirs_file:
+        # Mode 2: Load directories from file
+        roots = load_dirs_from_file(Path(dirs_file), verbose=verbose)
         if verbose:
-            print(f"Discovered {len(files)} files under root {root}")
+            print(f"Loaded {len(roots)} directories from {dirs_file}")
+        files = discover_source_files(
+            roots=roots,
+            exclude_patterns=exclude_patterns,
+            extensions=extensions,
+            include_file_patterns=include_file_patterns,
+            exclude_file_patterns=exclude_file_patterns,
+            verbose=verbose
+        )
+
+    elif dirs:
+        # Mode 3: Use directories from CLI
+        roots = [Path(d) for d in dirs if Path(d).exists()]
+        if verbose:
+            print(f"Scanning {len(roots)} directories from --dirs")
+        files = discover_source_files(
+            roots=roots,
+            exclude_patterns=exclude_patterns,
+            extensions=extensions,
+            include_file_patterns=include_file_patterns,
+            exclude_file_patterns=exclude_file_patterns,
+            verbose=verbose
+        )
+
+    else:
+        # Mode 4: Default to single root with exclusions
+        if verbose:
+            print(f"Scanning default root: {root}")
+        files = discover_source_files(
+            roots=[root],
+            exclude_patterns=exclude_patterns,
+            extensions=extensions,
+            include_file_patterns=include_file_patterns,
+            exclude_file_patterns=exclude_file_patterns,
+            verbose=verbose
+        )
+
     if not files:
-        print("No source files found.")
+        print("No source files found. Check paths and exclusion patterns.")
         return
 
     existing_embeddings, existing_meta = load_existing()
     cache = load_cache() if incremental and not force else {}
 
+    # Initialize model with GPU support
+    global GPU_DEVICE
     model = SentenceTransformer(MODEL_NAME)
+
+    # Auto-detect or configure GPU
+    if USE_GPU == "auto":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                GPU_DEVICE = "cuda"
+                model = model.to(GPU_DEVICE)
+                if verbose:
+                    print(f"GPU detected: {torch.cuda.get_device_name(0)}")
+                    print(f"Using CUDA for embeddings (expect 6-10x speedup)")
+        except ImportError:
+            if verbose:
+                print("PyTorch not available, using CPU")
+    elif USE_GPU == "true":
+        try:
+            import torch
+            GPU_DEVICE = "cuda"
+            model = model.to(GPU_DEVICE)
+            if verbose:
+                print(f"GPU forced: {torch.cuda.get_device_name(0)}")
+        except Exception as e:
+            print(f"Error: Failed to use GPU: {e}")
+            raise
 
     new_texts, new_meta = [], []
     reused_embeddings, reused_meta = [], []
@@ -322,7 +640,35 @@ def main() -> None:
     ap.add_argument("--root", default=str(DEFAULT_ROOT), help="Fallback root if not using index.")
     ap.add_argument("--auto-build-index", action="store_true", default=True, help="Automatically build index if missing or stale.")
     ap.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
-    # Indexer pass-through
+
+    # New modular file discovery arguments
+    ap.add_argument("--dirs", nargs="+", help="Directories to scan (can specify multiple)")
+    ap.add_argument("--dirs-file", help="File containing directory list (e.g., EngineDirs.txt)")
+
+    # Extension filtering (Layer 1)
+    ap.add_argument("--extensions", nargs="+", default=[".cpp", ".h", ".hpp", ".inl", ".cs"],
+                    help="File extensions to include (default: .cpp .h .hpp .inl .cs)")
+    ap.add_argument("--include-docs", action="store_true",
+                    help="Also index documentation files (.md, .txt)")
+
+    # Directory exclusion (Layer 2)
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="Directory patterns to exclude (added to defaults)")
+    ap.add_argument("--no-default-excludes", action="store_true",
+                    help="Disable default UE5 exclusions (Intermediate, Binaries, etc.)")
+
+    # File pattern filtering (Layer 3)
+    ap.add_argument("--include-files", nargs="+",
+                    help="Include only files matching these patterns (glob: *Vehicle*.cpp)")
+    ap.add_argument("--exclude-files", nargs="+",
+                    help="Exclude files matching these patterns (glob: *Test*.cpp)")
+
+    # .indexignore support
+    ap.add_argument("--indexignore", help="Path to specific .indexignore file to load")
+    ap.add_argument("--no-indexignore", action="store_true",
+                    help="Disable automatic .indexignore file loading")
+
+    # Indexer pass-through (DEPRECATED - for backward compatibility only)
     ap.add_argument("--Root", default="", help="Primary root directory to scan.")
     ap.add_argument("--SourceDirs", action='append', default=[], help="Additional source directories to scan.")
     ap.add_argument("--UseEngineDirs", action='store_true', help="Scan predefined Unreal Engine directories.")
@@ -339,6 +685,46 @@ def main() -> None:
     ap.add_argument("--BackgroundServer", action='store_true', help="Run HTTP server in background.")
     args = ap.parse_args()
 
+    # Build extension set
+    extensions = set(args.extensions)
+    if args.include_docs:
+        extensions.update({".md", ".txt"})
+
+    # Load .indexignore patterns (unless disabled)
+    indexignore_dir_pats = []
+    indexignore_file_pats = []
+
+    if not args.no_indexignore:
+        if args.indexignore:
+            # Load specific .indexignore file
+            indexignore_dir_pats, indexignore_file_pats = load_exclusions_from_file(
+                Path(args.indexignore), verbose=args.verbose
+            )
+        else:
+            # Auto-discover .indexignore files
+            roots_to_check = []
+            if args.dirs:
+                roots_to_check = [Path(d) for d in args.dirs]
+            elif args.dirs_file:
+                roots_to_check = load_dirs_from_file(Path(args.dirs_file))
+            elif args.root:
+                roots_to_check = [Path(args.root)]
+
+            if roots_to_check:
+                indexignore_dir_pats, indexignore_file_pats = load_all_indexignore_files(
+                    roots_to_check, verbose=args.verbose
+                )
+
+    # Build exclusion patterns (merge .indexignore + CLI + defaults)
+    exclude_patterns = list(DEFAULT_UE5_EXCLUDES) if not args.no_default_excludes else []
+    exclude_patterns.extend(indexignore_dir_pats)  # Add .indexignore patterns
+    exclude_patterns.extend(args.exclude)          # Add CLI patterns
+
+    # Build file exclusion patterns (merge .indexignore + CLI)
+    exclude_file_patterns = list(indexignore_file_pats)
+    if args.exclude_files:
+        exclude_file_patterns.extend(args.exclude_files)
+
     build(incremental=args.incremental,
           force=args.force,
           use_index=args.use_index,
@@ -346,6 +732,13 @@ def main() -> None:
           root=Path(args.root),
           auto_build_index=args.auto_build_index,
           verbose=args.verbose,
+          # New modular discovery parameters
+          dirs=args.dirs,
+          dirs_file=args.dirs_file,
+          extensions=extensions,
+          exclude_patterns=exclude_patterns,
+          include_file_patterns=args.include_files,
+          exclude_file_patterns=exclude_file_patterns,
           ps_root=args.Root,
           ps_source_dirs=args.SourceDirs,
           ps_use_engine_dirs=args.UseEngineDirs,
