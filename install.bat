@@ -74,7 +74,9 @@ if not exist "data" mkdir "data"
 if not exist "logs" mkdir "logs"
 
 REM Use Python helper script for reliable cross-platform copying
-python "%SCRIPT_DIR%install_helper.py" "%SCRIPT_DIR%" "%CD%"
+REM Note: SCRIPT_DIR includes trailing backslash, remove it to avoid quote escaping
+set "SRC_DIR=%SCRIPT_DIR:~0,-1%"
+python "%SCRIPT_DIR%install_helper.py" "%SRC_DIR%" "%CD%"
 if errorlevel 1 (
     echo [ERROR] Failed to copy source files
     exit /b 1

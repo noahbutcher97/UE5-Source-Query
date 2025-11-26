@@ -47,10 +47,14 @@ def copy_file(src_file: Path, dest_dir: Path):
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: install_helper.py <source_dir> <target_dir>")
+        print(f"Received {len(sys.argv)} arguments: {sys.argv}")
         sys.exit(1)
 
     source_root = Path(sys.argv[1])
     target_root = Path(sys.argv[2])
+
+    print(f"Source: {source_root}")
+    print(f"Target: {target_root}")
 
     print("Copying UE5 Source Query files...")
 
