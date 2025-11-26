@@ -54,13 +54,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Capture script directory BEFORE changing directories
+set "SCRIPT_DIR=%~dp0"
+
 echo [1/7] Creating directory structure...
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%"
 cd /d "%TARGET_DIR%"
 
 REM Copy source files
 echo [2/7] Copying source files...
-set "SCRIPT_DIR=%~dp0"
 
 REM Create directory structure
 if not exist "src" mkdir "src"
@@ -124,11 +126,6 @@ if !INSTALL_GPU!==1 (
 
 echo [7/7] Installation complete!
 echo.
-
-REM Copy configure.bat if it exists
-if exist "%SCRIPT_DIR%configure.bat" (
-    xcopy /Y /Q "%SCRIPT_DIR%configure.bat" "." >nul
-)
 
 echo.
 echo ====================================================================
