@@ -1,5 +1,4 @@
 @echo off
-setlocal EnableDelayedExpansion
 
 REM ====================================================================
 REM UE5 Source Query Tool - Automated Installation Script
@@ -14,6 +13,11 @@ REM   target_directory  : Where to install (default: current directory)
 REM   --gpu            : Install GPU acceleration support (CUDA 12.8)
 REM   --build-index    : Build vector index after installation
 REM ====================================================================
+
+REM Capture script directory FIRST before any setlocal or directory changes
+set "SCRIPT_DIR=%~dp0"
+
+setlocal EnableDelayedExpansion
 
 echo.
 echo ====================================================================
@@ -53,9 +57,6 @@ if errorlevel 1 (
     echo Please install Python from https://www.python.org/downloads/
     exit /b 1
 )
-
-REM Capture script directory BEFORE changing directories
-set "SCRIPT_DIR=%~dp0"
 
 echo [1/7] Creating directory structure...
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%"
