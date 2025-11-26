@@ -63,21 +63,38 @@ echo [2/7] Copying source files...
 set "SCRIPT_DIR=%~dp0"
 
 REM Create directory structure
-mkdir src\core 2>nul
-mkdir src\indexing 2>nul
-mkdir config 2>nul
-mkdir data 2>nul
-mkdir logs 2>nul
+if not exist "src" mkdir "src"
+if not exist "src\core" mkdir "src\core"
+if not exist "src\indexing" mkdir "src\indexing"
+if not exist "config" mkdir "config"
+if not exist "data" mkdir "data"
+if not exist "logs" mkdir "logs"
 
-REM Copy source files
-xcopy /Y /Q "%SCRIPT_DIR%src\core\*.*" "src\core\" >nul
-xcopy /Y /Q "%SCRIPT_DIR%src\indexing\*.*" "src\indexing\" >nul
-xcopy /Y /Q "%SCRIPT_DIR%ask.bat" "." >nul
-xcopy /Y /Q "%SCRIPT_DIR%requirements.txt" "." >nul
+REM Copy Python source files using robocopy (more reliable)
+echo    - Copying core modules...
+robocopy "%SCRIPT_DIR%src\core" "src\core" *.py /NJH /NJS /NDL /NP >nul
+if errorlevel 8 (
+    echo [ERROR] Failed to copy core modules
+    exit /b 1
+)
+
+echo    - Copying indexing modules...
+robocopy "%SCRIPT_DIR%src\indexing" "src\indexing" *.py *.ps1 *.bat *.txt /NJH /NJS /NDL /NP >nul
+if errorlevel 8 (
+    echo [ERROR] Failed to copy indexing modules
+    exit /b 1
+)
+
+REM Copy root-level files
+echo    - Copying configuration files...
+copy /Y "%SCRIPT_DIR%ask.bat" "." >nul
+copy /Y "%SCRIPT_DIR%requirements.txt" "." >nul
+if exist "%SCRIPT_DIR%requirements-gpu.txt" copy /Y "%SCRIPT_DIR%requirements-gpu.txt" "." >nul
+copy /Y "%SCRIPT_DIR%src\__init__.py" "src\" >nul
 
 REM Copy .env template
 if exist "%SCRIPT_DIR%config\.env.template" (
-    xcopy /Y /Q "%SCRIPT_DIR%config\.env.template" "config\" >nul
+    copy /Y "%SCRIPT_DIR%config\.env.template" "config\" >nul
 )
 
 echo [3/7] Creating virtual environment...
