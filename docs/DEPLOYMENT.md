@@ -26,7 +26,24 @@ The installer will:
 
 ## Post-Installation Setup
 
-### 1. Configure API Key
+The installer will automatically prompt you to run the configuration wizard, which includes:
+- API key setup
+- Engine path detection (automatically configures for your system)
+- Vector store location
+- Model selection
+
+### 1. If you skipped configuration, run it now:
+```bash
+cd YourProject\Scripts\UE5-Source-Query
+configure.bat
+```
+
+The configuration wizard will:
+- Detect your UE5 installation automatically (supports multiple versions)
+- Generate `EngineDirs.txt` with correct paths for your system
+- Set up API keys and other settings
+
+### 2. Manual API Key Configuration (if needed)
 Edit `Scripts/UE5-Source-Query/config/.env`:
 ```bash
 ANTHROPIC_API_KEY=your_actual_api_key_here
@@ -34,7 +51,7 @@ ANTHROPIC_API_KEY=your_actual_api_key_here
 
 Get your API key from: https://console.anthropic.com/
 
-### 2. Build Vector Index (if not done during install)
+### 3. Build Vector Index (if not done during install)
 ```bash
 cd YourProject\Scripts\UE5-Source-Query
 ask.bat --build-index
@@ -207,8 +224,18 @@ If false, reinstall GPU support:
 .venv\Scripts\pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
 
-### Path Issues After Moving Files
-Update `.env` file paths and reinstall packages:
+### Path Issues After Moving Files or Changing UE5 Version
+If you move the installation or upgrade/change UE5 versions, regenerate the engine paths:
+```bash
+fix-paths.bat
+```
+
+This will:
+1. Auto-detect your UE5 installations
+2. Regenerate `EngineDirs.txt` with correct paths
+3. Prompt you to rebuild the vector index
+
+Alternatively, update `.env` file paths and reinstall packages:
 ```bash
 .venv\Scripts\pip install --force-reinstall --no-deps -r requirements.txt
 ```
@@ -256,6 +283,49 @@ Scripts\UE5-Source-Query\ask.bat "your question here"
 
 **See:** Scripts/UE5-Source-Query/README.md for full documentation
 ```
+
+## Cross-Platform & Multi-Version Support
+
+### Automatic Engine Path Detection
+
+The tool automatically detects UE5 installations during configuration:
+
+**Detection Methods:**
+1. Windows Registry scan for Epic Games Launcher installations
+2. Common installation directories (C:, D:, E: drives)
+3. Manual path entry with validation
+
+**Supported Scenarios:**
+- Multiple UE5 versions installed (5.3, 5.4, 5.5, etc.)
+- Custom installation paths
+- Different drive letters across team members
+- Network installations
+
+### Team Deployment Workflow
+
+**For the team lead (one-time setup):**
+1. Run installer on development system: `install.bat "ProjectPath"`
+2. Configure with `configure.bat` (auto-detects your UE5 path)
+3. Build vector index (can be shared)
+4. Commit the tool to version control (excluding `.env` and `.venv`)
+
+**For team members:**
+1. Pull from version control
+2. Run `configure.bat` to auto-detect their UE5 installation
+3. Add their API key to `config/.env`
+4. Either build index or use shared vector store
+
+### Regenerating Paths
+
+When team members have different UE5 installations:
+```bash
+fix-paths.bat
+```
+
+This automatically:
+- Detects available UE5 versions
+- Regenerates `EngineDirs.txt` with correct paths
+- Preserves the same directory structure (just updates root path)
 
 ## Best Practices
 

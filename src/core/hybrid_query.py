@@ -28,6 +28,8 @@ def hybrid_query(
     dry_run: bool = False,
     show_reasoning: bool = False,
     json_out: bool = False,
+    scope: str = "engine",
+    embed_model_name: str = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -39,6 +41,8 @@ def hybrid_query(
         dry_run: Skip API call
         show_reasoning: Show query analysis reasoning
         json_out: Output as JSON
+        scope: Search scope ('engine', 'project', 'all')
+        embed_model_name: Override embedding model name
         **kwargs: Additional args passed to semantic search
 
     Returns:
@@ -60,6 +64,7 @@ def hybrid_query(
             print(f"Entity: {intent.entity_type.value} {intent.entity_name}")
         print(f"Confidence: {intent.confidence:.2f}")
         print(f"Reasoning: {intent.reasoning}")
+        print(f"Scope: {scope}")
         if intent.enhanced_query != question:
             print(f"Enhanced query: {intent.enhanced_query}")
         print()
@@ -72,7 +77,8 @@ def hybrid_query(
             'entity_name': intent.entity_name,
             'confidence': intent.confidence,
             'reasoning': intent.reasoning,
-            'enhanced_query': intent.enhanced_query
+            'enhanced_query': intent.enhanced_query,
+            'scope': scope
         },
         'definition_results': [],
         'semantic_results': [],
@@ -83,8 +89,12 @@ def hybrid_query(
     # Route based on intent
     if intent.query_type == QueryType.DEFINITION:
         # Pure definition extraction
+        # TODO: DefinitionExtractor needs scope support too? 
+        # For now, regex extraction is fast enough to just run on everything or we filter later.
+        # But DefinitionExtractor takes file_paths in init.
+        # We should ideally filter those file paths. 
         t1 = time.perf_counter()
-        def_results = _extract_definitions(intent)
+        def_results = _extract_definitions(intent, scope)
         timing['definition_extraction_s'] = time.perf_counter() - t1
 
         results['definition_results'] = [_format_def_result(r) for r in def_results]
@@ -93,7 +103,7 @@ def hybrid_query(
     elif intent.query_type == QueryType.HYBRID:
         # Try definition extraction first, supplement with semantic search
         t1 = time.perf_counter()
-        def_results = _extract_definitions(intent)
+        def_results = _extract_definitions(intent, scope)
         timing['definition_extraction_s'] = time.perf_counter() - t1
 
         t2 = time.perf_counter()
@@ -102,7 +112,9 @@ def hybrid_query(
             intent.enhanced_query,
             top_k=top_k,
             timing=timing,
-            intent=intent,  # Pass intent for entity boosting
+            intent=intent,
+            scope=scope,
+            embed_model_name=embed_model_name,
             **kwargs
         )
         timing['semantic_search_s'] = time.perf_counter() - t2
@@ -125,7 +137,9 @@ def hybrid_query(
             intent.enhanced_query,
             top_k=top_k,
             timing=timing,
-            intent=intent,  # Pass intent for potential entity boosting
+            intent=intent,
+            scope=scope,
+            embed_model_name=embed_model_name,
             **kwargs
         )
         timing['semantic_search_s'] = time.perf_counter() - t1
@@ -139,7 +153,7 @@ def hybrid_query(
     return results
 
 
-def _extract_definitions(intent) -> List[DefinitionResult]:
+def _extract_definitions(intent, scope: str = "engine") -> List[DefinitionResult]:
     """Extract definitions based on intent"""
     if not intent.entity_name or not intent.entity_type:
         return []
@@ -150,10 +164,23 @@ def _extract_definitions(intent) -> List[DefinitionResult]:
         return []
 
     meta = json.loads(meta_path.read_text())
-    file_paths = list(set(Path(item['path']) for item in meta['items']))
+    
+    # Filter files by scope
+    valid_paths = []
+    for item in meta['items']:
+        origin = item.get('origin', 'engine')
+        if scope == 'all' or origin == scope:
+            valid_paths.append(Path(item['path']))
+            
+    if not valid_paths:
+        return []
+        
+    # Deduplicate
+    file_paths = list(set(valid_paths))
 
     extractor = DefinitionExtractor(file_paths)
-
+    
+    # ... rest of extraction logic ...
     # Route to appropriate extractor
     if intent.entity_type == EntityType.STRUCT:
         return extractor.extract_struct(intent.entity_name)
@@ -167,21 +194,18 @@ def _extract_definitions(intent) -> List[DefinitionResult]:
     return []
 
 
-def _semantic_search(query: str, top_k: int, timing: dict, intent=None, **kwargs) -> List[Dict[str, Any]]:
+def _semantic_search(query: str, top_k: int, timing: dict, intent=None, scope: str = "engine", embed_model_name: str = None, **kwargs) -> List[Dict[str, Any]]:
     """
     Perform semantic search with optional filtered search and entity boosting.
-
-    If enriched metadata exists and intent has entity information,
-    uses FilteredSearch for relevance boosting.
     """
     # Load embeddings and metadata
     embeddings, meta = query_engine.load_store()
 
     # Check for enriched metadata
     enriched_meta_path = TOOL_ROOT / "data" / "vector_meta_enriched.json"
-    use_filtered_search = enriched_meta_path.exists()
+    has_enriched = enriched_meta_path.exists()
 
-    if use_filtered_search:
+    if has_enriched:
         enriched_meta = json.loads(enriched_meta_path.read_text())['items']
         timing['using_filtered_search'] = True
     else:
@@ -190,26 +214,35 @@ def _semantic_search(query: str, top_k: int, timing: dict, intent=None, **kwargs
 
     # Encode query
     t0 = time.perf_counter()
-    model = query_engine.get_model(kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL))
+    model = query_engine.get_model(embed_model_name or kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL))
     qvec = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
     timing['embed_s'] = time.perf_counter() - t0
 
     # Perform search
     t1 = time.perf_counter()
 
-    if use_filtered_search and intent and intent.entity_name:
+    # Determine origin filter
+    origin_filter = None
+    if scope == 'engine': origin_filter = 'engine'
+    elif scope == 'project': origin_filter = 'project'
+
+    # Use FilteredSearch if we have enriched meta OR if we need to filter by origin/scope
+    should_use_filtered = has_enriched or (origin_filter is not None) or (intent and intent.entity_name)
+
+    if should_use_filtered:
         # Use FilteredSearch with entity boosting
         search = FilteredSearch(embeddings, enriched_meta)
 
         # Extract entity names for boosting
-        boost_entities = [intent.entity_name] if intent.entity_name else []
+        boost_entities = [intent.entity_name] if intent and intent.entity_name else []
 
         results = search.search(
             qvec,
             top_k=top_k,
             boost_entities=boost_entities,
             boost_macros=True,  # Boost UE5 macro chunks
-            query_type=intent.query_type.value if intent else None  # Pass query type for header prioritization
+            query_type=intent.query_type.value if intent else None,
+            origin=origin_filter  # Pass scope filter
         )
 
         # Convert FilteredSearch results to query_engine format
@@ -296,6 +329,8 @@ def main():
     parser.add_argument("--show-reasoning", action="store_true", help="Show query analysis reasoning")
     parser.add_argument("--pattern", default="", help="Filter files by path substring")
     parser.add_argument("--extensions", default="", help="Filter by extensions (e.g., .cpp,.h)")
+    parser.add_argument("--scope", choices=["engine", "project", "all"], default="engine", help="Search scope (default: engine)")
+    parser.add_argument("--model", default=None, help="Override embedding model name")
 
     args = parser.parse_args()
     question = " ".join(args.question)
@@ -308,7 +343,9 @@ def main():
         show_reasoning=args.show_reasoning,
         json_out=args.json,
         pattern=args.pattern,
-        extensions=args.extensions
+        extensions=args.extensions,
+        scope=args.scope,
+        embed_model_name=args.model
     )
 
     # Output results

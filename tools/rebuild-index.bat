@@ -29,14 +29,14 @@ echo ====================================================================
 echo.
 
 REM Check if .env exists
-if not exist "%SCRIPT_DIR%config\.env" (
+if not exist "%SCRIPT_DIR%..\config\.env" (
     echo [ERROR] Configuration not found: config\.env
-    echo Please run configure.bat first to set up your configuration
+    echo Please run Setup.bat first to set up your configuration
     exit /b 1
 )
 
 REM Load configuration
-for /f "usebackq tokens=1,* delims==" %%a in ("%SCRIPT_DIR%config\.env") do (
+for /f "usebackq tokens=1,* delims==" %%a in ("%SCRIPT_DIR%..\config\.env") do (
     if "%%a"=="VECTOR_OUTPUT_DIR" set "VECTOR_DIR=%%b"
     if "%%a"=="EMBED_MODEL" set "EMBED_MODEL=%%b"
 )
@@ -52,14 +52,48 @@ echo   Embedding Model: %EMBED_MODEL%
 echo.
 
 REM Check if Python and venv exist
-if not exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
+if not exist "%SCRIPT_DIR%..\.venv\Scripts\python.exe" (
     echo [ERROR] Virtual environment not found
-    echo Please run install.bat or configure.bat first
+    echo.
+    echo Recovery steps:
+    echo   1. Run: Setup.bat
+    echo.
     exit /b 1
 )
 
+REM Validate EngineDirs.txt exists and is not empty
+if not exist "%SCRIPT_DIR%..\src\indexing\EngineDirs.txt" (
+    echo [ERROR] EngineDirs.txt not found!
+    echo.
+    echo This file contains the list of UE5 directories to index.
+    echo.
+    echo Recovery steps:
+    echo   1. Run: Setup.bat
+    echo      This will detect your UE5 installation and generate the file.
+    echo   2. Or run: fix-paths.bat
+    echo      This will regenerate paths for your system.
+    echo.
+    exit /b 1
+)
+
+REM Count lines to ensure it's not empty
+for /f %%i in ('find /c /v "" ^< "%SCRIPT_DIR%..\src\indexing\EngineDirs.txt"') do set LINE_COUNT=%%i
+if %LINE_COUNT% LSS 5 (
+    echo [ERROR] EngineDirs.txt appears empty or corrupted
+    echo   Found only %LINE_COUNT% lines, expected at least 5.
+    echo.
+    echo Recovery steps:
+    echo   1. Run: fix-paths.bat
+    echo      This will regenerate the file.
+    echo.
+    exit /b 1
+)
+
+echo EngineDirs.txt validated: %LINE_COUNT% directory entries
+echo.
+
 REM Parse arguments
-set "BUILD_ARGS=--dirs-file src\indexing\EngineDirs.txt"
+set "BUILD_ARGS=--dirs-file %SCRIPT_DIR%..\src\indexing\EngineDirs.txt"
 set "SHOW_PROGRESS=0"
 
 :parse_loop
@@ -103,6 +137,27 @@ if exist "%VECTOR_DIR%\vector_store.npz" (
     echo.
 )
 
+REM Backup existing index if it exists
+if exist "%VECTOR_DIR%\vector_store.npz" (
+    echo [*] Backing up existing vector store...
+
+    REM Create timestamp
+    for /f "tokens=1-3 delims=/ " %%a in ("%date%") do set DATE_STAMP=%%c%%a%%b
+    for /f "tokens=1-3 delims=:. " %%a in ("%time%") do set TIME_STAMP=%%a%%b%%c
+    set TIME_STAMP=%TIME_STAMP: =0%
+    set BACKUP_TIMESTAMP=%DATE_STAMP%_%TIME_STAMP%
+
+    REM Backup both files
+    copy "%VECTOR_DIR%\vector_store.npz" "%VECTOR_DIR%\vector_store.npz.backup_%BACKUP_TIMESTAMP%" >nul 2>&1
+    if exist "%VECTOR_DIR%\vector_meta.json" (
+        copy "%VECTOR_DIR%\vector_meta.json" "%VECTOR_DIR%\vector_meta.json.backup_%BACKUP_TIMESTAMP%" >nul 2>&1
+    )
+
+    echo [✓] Backup created: vector_store.npz.backup_%BACKUP_TIMESTAMP%
+    echo     To restore: copy "%VECTOR_DIR%\vector_store.npz.backup_%BACKUP_TIMESTAMP%" "%VECTOR_DIR%\vector_store.npz"
+    echo.
+)
+
 echo Starting index rebuild...
 echo This may take 2-3 minutes with GPU or 30-40 minutes with CPU
 echo.
@@ -113,13 +168,13 @@ if %SHOW_PROGRESS%==1 (
 )
 
 REM Run the build script
-cd /d "%SCRIPT_DIR%"
+cd /d "%SCRIPT_DIR%.."
 ".venv\Scripts\python.exe" src\indexing\build_embeddings.py %BUILD_ARGS% --output-dir "%VECTOR_DIR%"
 
 if errorlevel 1 (
     echo.
     echo [ERROR] Index build failed
-    echo Check logs for details: %SCRIPT_DIR%logs\
+    echo Check logs for details: %SCRIPT_DIR%..\logs\
     exit /b 1
 )
 

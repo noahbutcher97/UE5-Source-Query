@@ -6,13 +6,55 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Vector store data (large binary files)
+# ====================================================================
+# Vector Store Data (Large Binary Files)
+# ====================================================================
+# IMPORTANT: Choose ONE of the following strategies for your team:
+#
+# Strategy A: Build Per-Machine (Default - Recommended)
+#   - Each developer runs rebuild-index.bat on their own machine
+#   - Keep lines below uncommented (files ignored by Git)
+#   - Pros: Works with different UE5 versions, no network overhead
+#   - Cons: 5-15 min setup time per developer
+#
+# Strategy B: Shared via Git LFS
+#   - One person builds, shares via Git LFS for the team
+#   - Comment out vector_store.npz and vector_meta.json lines
+#   - Run setup-git-lfs.bat to configure
+#   - Pros: Team members get instant pre-built index
+#   - Cons: Requires Git LFS, only works if all have same UE5 version
+#
+# For detailed guidance, see: docs/TEAM_SETUP.md
+# ====================================================================
+
+# Strategy A (Default): Ignore vector store - build per-machine
 data/vector_store.npz
+data/vector_meta.json
 data/*_enriched.json
 data/vector_cache.json
 
-# Configuration (contains API keys)
+# Strategy B (Git LFS): Comment out the two lines above, then run:
+#   setup-git-lfs.bat
+# This will configure .gitattributes to track via LFS
+
+# ====================================================================
+# Configuration (Contains API Keys - NEVER COMMIT!)
+# ====================================================================
 config/.env
+
+# ====================================================================
+# Machine-Specific Paths (Generated Locally)
+# ====================================================================
+# EngineDirs.txt is generated from EngineDirs.template.txt by:
+#   - configure.bat (initial setup)
+#   - fix-paths.bat (regenerate paths)
+# Each developer's paths will be different based on their UE5 install location
+src/indexing/EngineDirs.txt
+
+# Backup files created by rebuild-index.bat
+data/vector_store.npz.backup_*
+data/vector_meta.json.backup_*
+*.backup_*
 
 # IDE
 .vscode/

@@ -453,7 +453,7 @@ def _invoke_indexer(args_list: list[str], verbose: bool):
         print("Index build output:\n", result.stdout.strip())
 
 def build(incremental: bool, force: bool, use_index: bool, index_path: Path, root: Path, auto_build_index: bool, verbose: bool,
-          dirs: List[str] = None, dirs_file: str = None, extensions: set = None,
+          dirs: List[str] = None, dirs_file: str = None, project_dirs_file: str = None, extensions: set = None,
           exclude_patterns: List[str] = None, include_file_patterns: List[str] = None, exclude_file_patterns: List[str] = None,
           output_dir: str = None,
           ps_root: str = "", ps_source_dirs: List[str] = None, ps_use_engine_dirs: bool = False, ps_output_dir: str = "",
@@ -514,42 +514,69 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             _invoke_indexer(build_args(), verbose)
 
     # Determine input mode and discover files
+    files_with_origin = [] # List of (Path, origin_str)
+
     if use_index:
-        # Mode 1: Use pre-built index (backward compatibility)
+        # Mode 1: Use pre-built index (backward compatibility) -> assume engine
         files = load_index_file(index_path)
+        files_with_origin = [(f, 'engine') for f in files]
         if verbose:
             print(f"Loaded {len(files)} files from index")
 
-    elif dirs_file:
-        # Mode 2: Load directories from file
-        roots = load_dirs_from_file(Path(dirs_file), verbose=verbose)
-        if verbose:
-            print(f"Loaded {len(roots)} directories from {dirs_file}")
-        files = discover_source_files(
-            roots=roots,
-            exclude_patterns=exclude_patterns,
-            extensions=extensions,
-            include_file_patterns=include_file_patterns,
-            exclude_file_patterns=exclude_file_patterns,
-            verbose=verbose
-        )
+    elif dirs_file or dirs or ps_engine_dirs_file:
+        # Mode 2: Load directories from files/CLI
+        
+        # A. Engine Dirs
+        engine_roots = []
+        if dirs_file:
+             engine_roots.extend(load_dirs_from_file(Path(dirs_file), verbose=verbose))
+        elif dirs:
+             engine_roots.extend([Path(d) for d in dirs if Path(d).exists()])
+        elif not dirs and not dirs_file:
+             # Default to EngineDirs.txt if no other input specified
+             # logic from original: ps_engine_dirs_file default is "EngineDirs.txt"
+             if Path(ps_engine_dirs_file).exists():
+                 engine_roots.extend(load_dirs_from_file(Path(ps_engine_dirs_file), verbose=verbose))
 
-    elif dirs:
-        # Mode 3: Use directories from CLI
-        roots = [Path(d) for d in dirs if Path(d).exists()]
-        if verbose:
-            print(f"Scanning {len(roots)} directories from --dirs")
-        files = discover_source_files(
-            roots=roots,
-            exclude_patterns=exclude_patterns,
-            extensions=extensions,
-            include_file_patterns=include_file_patterns,
-            exclude_file_patterns=exclude_file_patterns,
-            verbose=verbose
-        )
+        if engine_roots:
+            if verbose:
+                print(f"Scanning {len(engine_roots)} Engine directories...")
+            engine_files = discover_source_files(
+                roots=engine_roots,
+                exclude_patterns=exclude_patterns,
+                extensions=extensions,
+                include_file_patterns=include_file_patterns,
+                exclude_file_patterns=exclude_file_patterns,
+                verbose=verbose
+            )
+            files_with_origin.extend([(f, 'engine') for f in engine_files])
+
+        # B. Project Dirs (NEW)
+        project_roots = []
+        # Check for ProjectDirs.txt in the same dir as EngineDirs.txt usually
+        # We need a way to pass this in. I'll add project_dirs_file to build signature.
+        # For now, hardcode look up or use arg if I added it.
+        # Let's assume I added 'project_dirs_file' to build() args.
+        
+        # Wait, I need to update the function signature first. 
+        # Since I'm replacing the whole block, I'll use the variable name I intend to add.
+        if 'project_dirs_file' in locals() and project_dirs_file and Path(project_dirs_file).exists():
+            project_roots = load_dirs_from_file(Path(project_dirs_file), verbose=verbose)
+            if project_roots:
+                if verbose:
+                    print(f"Scanning {len(project_roots)} Project directories...")
+                project_files = discover_source_files(
+                    roots=project_roots,
+                    exclude_patterns=exclude_patterns,
+                    extensions=extensions,
+                    include_file_patterns=include_file_patterns,
+                    exclude_file_patterns=exclude_file_patterns,
+                    verbose=verbose
+                )
+                files_with_origin.extend([(f, 'project') for f in project_files])
 
     else:
-        # Mode 4: Default to single root with exclusions
+        # Mode 4: Default to single root -> assume engine
         if verbose:
             print(f"Scanning default root: {root}")
         files = discover_source_files(
@@ -560,8 +587,9 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             exclude_file_patterns=exclude_file_patterns,
             verbose=verbose
         )
+        files_with_origin = [(f, 'engine') for f in files]
 
-    if not files:
+    if not files_with_origin:
         print("No source files found. Check paths and exclusion patterns.")
         return
 
@@ -599,8 +627,8 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     new_texts, new_meta = [], []
     reused_embeddings, reused_meta = [], []
 
-    iterator = tqdm(files, desc="Scanning files", unit="file") if tqdm else files
-    for file in iterator:
+    iterator = tqdm(files_with_origin, desc="Scanning files", unit="file") if tqdm else files_with_origin
+    for file, origin in iterator:
         try:
             raw = file.read_text(encoding="utf-8", errors="ignore")
         except OSError as e:
@@ -624,6 +652,7 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             new_texts.append(chunk)
             new_meta.append({
                 "path": str(file),
+                "origin": origin,
                 "chunk_index": idx,
                 "total_chunks": len(chunks),
                 "chars": len(chunk)
@@ -656,6 +685,35 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     print(f"Embedding phase {time.time() - t_embed_start:.1f}s")
     print(f"Wrote {OUT_VECTORS.name}, {OUT_META.name}")
 
+    # NEW: Verify the build succeeded
+    print("\nVerifying vector store integrity...")
+    try:
+        # Reload and validate
+        test_load = np.load(OUT_VECTORS, allow_pickle=False)
+        test_embeddings = test_load['embeddings']
+        test_meta = json.loads(OUT_META.read_text())['items']
+
+        # Dimension check
+        model_dims = model.get_sentence_embedding_dimension()
+        if test_embeddings.shape[1] != model_dims:
+            raise ValueError(f"Dimension mismatch: {test_embeddings.shape[1]} != {model_dims}")
+
+        # Alignment check
+        if len(test_embeddings) != len(test_meta):
+            raise ValueError(f"Misalignment: {len(test_embeddings)} embeddings != {len(test_meta)} metadata")
+
+        # Size check
+        if OUT_VECTORS.stat().st_size == 0 or OUT_META.stat().st_size == 0:
+            raise ValueError("Output files are empty")
+
+        print(f"✓ Vector store verified: {len(test_meta)} chunks, {test_embeddings.shape[1]} dimensions")
+
+    except Exception as e:
+        print(f"✗ ERROR: Vector store verification failed: {e}")
+        print(f"  The build may have succeeded but output is corrupted.")
+        print(f"  Try rebuilding with --force --verbose")
+        sys.exit(1)
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--incremental", action="store_true")
@@ -669,6 +727,7 @@ def main() -> None:
     # New modular file discovery arguments
     ap.add_argument("--dirs", nargs="+", help="Directories to scan (can specify multiple)")
     ap.add_argument("--dirs-file", help="File containing directory list (e.g., EngineDirs.txt)")
+    ap.add_argument("--project-dirs-file", default="ProjectDirs.txt", help="File containing project directory list")
 
     # Extension filtering (Layer 1)
     ap.add_argument("--extensions", nargs="+", default=[".cpp", ".h", ".hpp", ".inl", ".cs"],
@@ -764,6 +823,7 @@ def main() -> None:
           # New modular discovery parameters
           dirs=args.dirs,
           dirs_file=args.dirs_file,
+          project_dirs_file=args.project_dirs_file,
           extensions=extensions,
           exclude_patterns=exclude_patterns,
           include_file_patterns=args.include_files,

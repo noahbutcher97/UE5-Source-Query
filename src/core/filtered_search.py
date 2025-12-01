@@ -45,6 +45,7 @@ class FilteredSearch:
         # Filters
         entity: Optional[str] = None,
         entity_type: Optional[str] = None,
+        origin: Optional[str] = None,  # 'engine' or 'project'
         has_uproperty: Optional[bool] = None,
         has_uclass: Optional[bool] = None,
         file_type: Optional[str] = None,  # 'header' or 'implementation'
@@ -63,6 +64,7 @@ class FilteredSearch:
             top_k: Number of results
             entity: Filter to chunks containing this entity
             entity_type: Filter by type ('struct', 'class', 'enum')
+            origin: Filter by origin ('engine', 'project')
             has_uproperty: Filter by UPROPERTY presence
             has_uclass: Filter by UCLASS presence
             file_type: 'header' or 'implementation'
@@ -79,6 +81,7 @@ class FilteredSearch:
         valid_indices = self._apply_filters(
             entity=entity,
             entity_type=entity_type,
+            origin=origin,
             has_uproperty=has_uproperty,
             has_uclass=has_uclass,
             file_type=file_type
@@ -121,6 +124,7 @@ class FilteredSearch:
         self,
         entity: Optional[str],
         entity_type: Optional[str],
+        origin: Optional[str],
         has_uproperty: Optional[bool],
         has_uclass: Optional[bool],
         file_type: Optional[str]
@@ -129,6 +133,13 @@ class FilteredSearch:
         valid_indices = []
 
         for i, meta in enumerate(self.metadata):
+            # Origin filter
+            if origin is not None:
+                # Default to 'engine' for backward compatibility
+                chunk_origin = meta.get('origin', 'engine')
+                if chunk_origin != origin:
+                    continue
+
             # Entity filter
             if entity is not None:
                 if not self.is_enriched:
@@ -281,7 +292,7 @@ def main():
         print("Run: python src/indexing/metadata_enricher.py data/vector_meta.json")
         return
 
-    embeddings = np.load(vectors_path, mmap_mode="r")["embeddings"]
+    embeddings = np.load(vectors_path, mmap_mode="r", allow_pickle=False)["embeddings"]
     metadata = json.loads(meta_path.read_text())['items']
 
     # Create filtered search

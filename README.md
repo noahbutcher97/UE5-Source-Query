@@ -4,6 +4,20 @@
 
 ## Quick Start
 
+### 🎨 GUI Tools (Recommended - Just Double-Click!)
+
+All tools now have **visual interfaces** - no command-line needed!
+
+| Tool | Description |
+|------|-------------|
+| **`install.bat`** | 📦 Install to new location (GUI wizard) |
+| **`configure-gui.bat`** | ⚙️ Set up API key & UE5 paths |
+| **`health-check-gui.bat`** | ✅ Verify system health |
+| **`rebuild-index-gui.bat`** | 🔄 Rebuild vector index |
+| **`fix-paths-gui.bat`** | 🔧 Fix UE5 path configuration |
+
+**See [GUI_TOOLS.md](GUI_TOOLS.md) for complete GUI guide**
+
 ### For End Users (Deployed Projects)
 ```bash
 # Simple query interface
@@ -44,15 +58,100 @@ python src/core/definition_extractor.py struct HitRes --fuzzy
 
 ## Deployment
 
-Deploy to new UE5 projects with automated installer:
+### Quick Start for Teams
+
+**New team members** - Get up and running in 5 minutes:
 
 ```bash
-# Quick deployment with GPU acceleration
-cd D:\DevTools\UE5-Source-Query
-install.bat "D:\YourProject" --gpu --build-index
+# 1. Clone the repository
+git clone <repository-url>
+cd UE5-Source-Query
+
+# 2. Run the configuration wizard
+configure.bat
+# This will:
+#   - Create Python virtual environment
+#   - Install all dependencies
+#   - Prompt for your Anthropic API key
+#   - Auto-detect your UE5 installation
+#   - Generate machine-specific paths
+
+# 3. Verify everything is working
+health-check.bat
+
+# 4. Build the vector index (or skip if using Git LFS)
+rebuild-index.bat
+
+# 5. Start querying!
+ask.bat "What is FVector"
+```
+
+**Detailed team setup guide:** [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md)
+
+### Vector Store Strategies
+
+**Choose ONE approach for your team:**
+
+#### Strategy A: Build Per-Machine (Default)
+- **Best for**: Teams with different UE5 versions, small teams
+- **Setup time**: 5-15 minutes per developer
+- **Network**: No LFS bandwidth needed
+- **How it works**: Each dev runs `rebuild-index.bat`
+
+#### Strategy B: Shared via Git LFS
+- **Best for**: Large teams, identical UE5 versions
+- **Setup time**: < 1 minute (instant download)
+- **Network**: Requires Git LFS (20-50 MB per developer)
+- **How it works**: One person builds, team downloads pre-built index
+
+**To enable Git LFS sharing:**
+```bash
+# Team lead runs once:
+setup-git-lfs.bat
+rebuild-index.bat
+git add data/vector_store.npz data/vector_meta.json
+git commit -m "Add pre-built vector store for UE 5.3"
+git push
+
+# Team members:
+git lfs install
+git clone <repository-url>
+health-check.bat  # Verifies vector store downloaded
+```
+
+**See .gitignore for configuration details**
+
+### Project Deployment
+
+#### GUI Installer (Double-Click to Install)
+
+**Simply double-click `install.bat` to launch the graphical installer!**
+
+**Features:**
+- 🖱️ Browse for target directory via file explorer
+- ☑️ Visual checkboxes for all options (GPU, build index, copy config)
+- 📊 Real-time installation progress log
+- ✅ Automatic prerequisites checking
+- ▶️ Big green "Install Now" button to start
+
+**What it does:**
+1. Opens a friendly GUI window
+2. Select where to install using Browse button
+3. Check your options (GPU support, build index, etc.)
+4. Click "▶ Install Now"
+5. Watch the installation progress in real-time
+6. Get next steps when complete!
+
+#### Command-Line Installer (For Automation)
+
+For CI/CD or scripted deployments:
+
+```bash
+# Quick deployment with all options
+installer\install_cli.bat "D:\YourProject" --gpu --build-index
 
 # CPU-only deployment
-install.bat "D:\YourProject"
+installer\install_cli.bat "D:\YourProject"
 ```
 
 **See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete deployment guide**
@@ -388,6 +487,36 @@ results = search.search(qvec, boost_entities=["FHitResult"], boost_macros=True)
 
 ## Troubleshooting
 
+### Quick Diagnostics
+
+```bash
+# Run comprehensive health check
+health-check.bat
+
+# Check with detailed output
+health-check.bat --verbose
+
+# Verify vector store integrity
+.venv\Scripts\python src\utils\verify_vector_store.py --verbose
+```
+
+### Common Issues
+
+**Q: "Virtual environment not found"**
+```bash
+configure.bat  # Creates venv and installs dependencies
+```
+
+**Q: "EngineDirs.txt not found"**
+```bash
+fix-paths.bat  # Regenerates paths for your UE5 installation
+```
+
+**Q: "Vector store is corrupted"**
+```bash
+rebuild-index.bat --force  # Rebuilds vector store from scratch
+```
+
 **Q: Definition not found?**
 1. Check capitalization (UE5 convention: FHitResult, AActor, ECollisionChannel)
 2. Try fuzzy matching: `--fuzzy` flag
@@ -406,6 +535,8 @@ python src/indexing/metadata_enricher.py data/vector_meta.json
 # Use filtered search (see examples above)
 python src/core/filtered_search.py
 ```
+
+**For comprehensive troubleshooting:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ## Development
 

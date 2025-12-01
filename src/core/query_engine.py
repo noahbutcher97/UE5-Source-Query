@@ -51,8 +51,8 @@ def get_model(name: str):
 def load_store():
     if not VECTORS.exists() or not META.exists():
         raise SystemExit("Vector store missing. Run: python BuildEmbeddings.py --use-index")
-    # memory map for large arrays
-    arr = np.load(VECTORS, mmap_mode="r")["embeddings"]
+    # memory map for large arrays, enforce no pickle for security
+    arr = np.load(VECTORS, mmap_mode="r", allow_pickle=False)["embeddings"]
     meta = json.loads(META.read_text())["items"]
     return arr, meta
 
