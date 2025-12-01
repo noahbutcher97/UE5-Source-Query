@@ -4,6 +4,7 @@
 sentence-transformers>=2.2.0  # Semantic embedding model
 anthropic>=0.7.0              # Claude API client (optional for natural language answers)
 numpy>=1.24.0                 # Vector operations and storage
+scikit-learn>=1.0.0           # Required for some sentence-transformers operations
 python-dotenv>=1.0.0          # Environment variable management
 
 # Optional dependencies

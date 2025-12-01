@@ -26,4 +26,10 @@ if errorlevel 1 (
 REM Launch GUI deployment wizard
 python "%SCRIPT_DIR%installer\gui_deploy.py"
 
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Installer crashed or failed.
+    pause
+)
+
 exit /b %errorlevel%

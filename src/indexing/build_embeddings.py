@@ -120,12 +120,23 @@ def load_dirs_from_file(file_path: Path, verbose: bool = False) -> List[Path]:
         return []
 
     dirs = []
+    engine_root = os.getenv("UE_ENGINE_ROOT", "")
+    
     for line_num, line in enumerate(file_path.read_text(encoding='utf-8').splitlines(), 1):
         line = line.strip()
 
         # Skip comments and empty lines
         if not line or line.startswith('#'):
             continue
+
+        # Perform substitution
+        if "{ENGINE_ROOT}" in line:
+            if engine_root:
+                line = line.replace("{ENGINE_ROOT}", engine_root)
+            else:
+                if verbose:
+                    print(f"Warning line {line_num}: {{ENGINE_ROOT}} placeholder found but UE_ENGINE_ROOT env var not set.")
+                continue
 
         path = Path(line)
         if path.exists() and path.is_dir():
@@ -516,27 +527,24 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     # Determine input mode and discover files
     files_with_origin = [] # List of (Path, origin_str)
 
+    # --- 1. Engine Files Discovery ---
+    engine_files = []
+    
     if use_index:
-        # Mode 1: Use pre-built index (backward compatibility) -> assume engine
-        files = load_index_file(index_path)
-        files_with_origin = [(f, 'engine') for f in files]
+        # Mode 1: Use pre-built index (backward compatibility)
+        engine_files = load_index_file(index_path)
         if verbose:
-            print(f"Loaded {len(files)} files from index")
+            print(f"Loaded {len(engine_files)} engine files from index")
 
-    elif dirs_file or dirs or ps_engine_dirs_file:
+    elif dirs_file or dirs or (ps_engine_dirs_file and Path(ps_engine_dirs_file).exists()):
         # Mode 2: Load directories from files/CLI
-        
-        # A. Engine Dirs
         engine_roots = []
         if dirs_file:
              engine_roots.extend(load_dirs_from_file(Path(dirs_file), verbose=verbose))
         elif dirs:
              engine_roots.extend([Path(d) for d in dirs if Path(d).exists()])
-        elif not dirs and not dirs_file:
-             # Default to EngineDirs.txt if no other input specified
-             # logic from original: ps_engine_dirs_file default is "EngineDirs.txt"
-             if Path(ps_engine_dirs_file).exists():
-                 engine_roots.extend(load_dirs_from_file(Path(ps_engine_dirs_file), verbose=verbose))
+        elif ps_engine_dirs_file:
+             engine_roots.extend(load_dirs_from_file(Path(ps_engine_dirs_file), verbose=verbose))
 
         if engine_roots:
             if verbose:
@@ -549,37 +557,11 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
                 exclude_file_patterns=exclude_file_patterns,
                 verbose=verbose
             )
-            files_with_origin.extend([(f, 'engine') for f in engine_files])
-
-        # B. Project Dirs (NEW)
-        project_roots = []
-        # Check for ProjectDirs.txt in the same dir as EngineDirs.txt usually
-        # We need a way to pass this in. I'll add project_dirs_file to build signature.
-        # For now, hardcode look up or use arg if I added it.
-        # Let's assume I added 'project_dirs_file' to build() args.
-        
-        # Wait, I need to update the function signature first. 
-        # Since I'm replacing the whole block, I'll use the variable name I intend to add.
-        if 'project_dirs_file' in locals() and project_dirs_file and Path(project_dirs_file).exists():
-            project_roots = load_dirs_from_file(Path(project_dirs_file), verbose=verbose)
-            if project_roots:
-                if verbose:
-                    print(f"Scanning {len(project_roots)} Project directories...")
-                project_files = discover_source_files(
-                    roots=project_roots,
-                    exclude_patterns=exclude_patterns,
-                    extensions=extensions,
-                    include_file_patterns=include_file_patterns,
-                    exclude_file_patterns=exclude_file_patterns,
-                    verbose=verbose
-                )
-                files_with_origin.extend([(f, 'project') for f in project_files])
-
     else:
-        # Mode 4: Default to single root -> assume engine
+        # Mode 4: Default to single root
         if verbose:
             print(f"Scanning default root: {root}")
-        files = discover_source_files(
+        engine_files = discover_source_files(
             roots=[root],
             exclude_patterns=exclude_patterns,
             extensions=extensions,
@@ -587,10 +569,30 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             exclude_file_patterns=exclude_file_patterns,
             verbose=verbose
         )
-        files_with_origin = [(f, 'engine') for f in files]
+
+    # Add engine files to main list
+    files_with_origin.extend([(f, 'engine') for f in engine_files])
+
+    # --- 2. Project Files Discovery ---
+    if project_dirs_file and Path(project_dirs_file).exists():
+        project_roots = load_dirs_from_file(Path(project_dirs_file), verbose=verbose)
+        if project_roots:
+            if verbose:
+                print(f"Scanning {len(project_roots)} Project directories...")
+            project_files = discover_source_files(
+                roots=project_roots,
+                exclude_patterns=exclude_patterns,
+                extensions=extensions,
+                include_file_patterns=include_file_patterns,
+                exclude_file_patterns=exclude_file_patterns,
+                verbose=verbose
+            )
+            files_with_origin.extend([(f, 'project') for f in project_files])
+            if verbose:
+                print(f"Found {len(project_files)} project files")
 
     if not files_with_origin:
-        print("No source files found. Check paths and exclusion patterns.")
+        print("No source files found (Engine or Project). Check paths and exclusion patterns.")
         return
 
     existing_embeddings, existing_meta = load_existing()

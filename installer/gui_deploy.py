@@ -1,9 +1,6 @@
 """
-UE5 Source Query Tool - GUI Deployment Wizard
-Interactive installer with all deployment options, validation, and automatic vector store building.
-
-Usage:
-    python gui_deploy.py
+UE5 Source Query Tool - Deployment Wizard (Unified Style)
+The \"Install-Time\" interface. Sets up the environment and config before the Dashboard can run.
 """
 
 import sys
@@ -16,696 +13,898 @@ from pathlib import Path
 import threading
 import queue
 import json
-import time
 
+# Add src to path to import utils
+# This assumes installer/ is sibling to src/
+SCRIPT_DIR = Path(__file__).parent.parent
+sys.path.append(str(SCRIPT_DIR))
+
+from src.utils.gui_theme import Theme
+from src.utils.config_manager import ConfigManager
+from src.utils.source_manager import SourceManager
+from src.utils.engine_helper import get_available_engines, resolve_uproject_source
+from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+from src.utils.cuda_installer import install_cuda_with_progress, create_gpu_requirements_file
 
 class DeploymentWizard:
-    """GUI wizard for deploying UE5 Source Query Tool"""
-
     def __init__(self, root):
         self.root = root
-        self.root.title("UE5 Source Query - Deployment Wizard")
-        self.root.geometry("850x750")
-        self.root.resizable(True, True)
-
-        # Center window on screen
-        self.root.update_idletasks()
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width - 850) // 2
-        y = (screen_height - 750) // 2
-        self.root.geometry(f"850x750+{x}+{y}")
-
-        # Get source directory (where this script is located)
-        self.source_dir = Path(__file__).parent.parent
-
-        # Deployment settings
+        self.root.title("UE5 Source Query - Setup & Install")
+        self.root.geometry("900x700")
+        
+        Theme.apply(self.root)
+        self.source_dir = SCRIPT_DIR
+        
+        # State
         self.target_dir = tk.StringVar(value=str(Path.home() / "Documents" / "UE5-Source-Query"))
         self.gpu_support = tk.BooleanVar(value=False)
         self.build_index = tk.BooleanVar(value=True)
-        self.copy_config = tk.BooleanVar(value=True)
+        self.create_shortcut = tk.BooleanVar(value=True)
         self.update_existing = tk.BooleanVar(value=False)
-
-        # Queue for thread-safe logging
-        self.log_queue = queue.Queue()
-
-        # Progress tracking
-        self.total_steps = 8
-        self.current_step = 0
-
-        self.create_widgets()
-        self.check_prerequisites()
-        self.root.after(100, self.process_log_queue)
-
-    def create_widgets(self):
-        """Create all UI widgets"""
-
-        # Header
-        header = tk.Frame(self.root, bg="#2C3E50", height=80)
-        header.pack(fill=tk.X)
-        header.pack_propagate(False)
-
-        title = tk.Label(
-            header,
-            text="UE5 Source Query Tool",
-            font=("Arial", 18, "bold"),
-            bg="#2C3E50",
-            fg="white"
-        )
-        title.pack(pady=10)
-
-        subtitle = tk.Label(
-            header,
-            text="Deployment Wizard",
-            font=("Arial", 12),
-            bg="#2C3E50",
-            fg="#BDC3C7"
-        )
-        subtitle.pack()
-
-        # Buttons (Bottom Layout)
-        button_frame = tk.Frame(self.root, padx=20, pady=20, bd=1, relief=tk.RAISED)
-        button_frame.pack(side=tk.BOTTOM, fill=tk.X)
-
-        self.install_btn = tk.Button(
-            button_frame,
-            text="▶ Install Now",
-            command=self.start_installation,
-            bg="#27AE60",
-            fg="white",
-            font=("Arial", 12, "bold"),
-            padx=30,
-            pady=10,
-            relief=tk.RAISED,
-            bd=3
-        )
-        self.install_btn.pack(side=tk.LEFT, padx=(0, 10))
-
-        tk.Button(
-            button_frame,
-            text="Cancel",
-            command=self.root.quit,
-            font=("Arial", 10),
-            padx=20,
-            pady=10
-        ).pack(side=tk.LEFT)
-
-        # Main content area
-        content = tk.Frame(self.root, padx=20, pady=20)
-        content.pack(fill=tk.BOTH, expand=True)
-
-        # Target directory section
-        dir_frame = tk.LabelFrame(content, text="Deployment Location", padx=10, pady=10)
-        dir_frame.pack(fill=tk.X, pady=(0, 10))
-
-        dir_entry_frame = tk.Frame(dir_frame)
-        dir_entry_frame.pack(fill=tk.X)
-
-        tk.Label(dir_entry_frame, text="Target:").pack(side=tk.LEFT, padx=(0, 5))
-        tk.Entry(dir_entry_frame, textvariable=self.target_dir, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Button(dir_entry_frame, text="Browse...", command=self.browse_directory).pack(side=tk.LEFT)
-
-        # Project Source section (Optional)
-        project_frame = tk.LabelFrame(content, text="Project Source (Optional)", padx=10, pady=10)
-        project_frame.pack(fill=tk.X, pady=(0, 10))
-
-        project_entry_frame = tk.Frame(project_frame)
-        project_entry_frame.pack(fill=tk.X)
-
-        tk.Label(project_entry_frame, text="Project:").pack(side=tk.LEFT, padx=(0, 5))
-        self.project_path = tk.StringVar()
-        tk.Entry(project_entry_frame, textvariable=self.project_path, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Button(project_entry_frame, text="Browse...", command=self.browse_project).pack(side=tk.LEFT)
+        self.gpu_info = None  # Will be populated after GPU detection
         
-        tk.Label(project_frame, text="Select your .uproject file to index your game code alongside the engine.", 
-                 font=("Arial", 8), fg="#666").pack(anchor=tk.W, pady=(5, 0))
+        # Config State
+        self.api_key = tk.StringVar(value=os.environ.get("ANTHROPIC_API_KEY", ""))
+        self.engine_path = tk.StringVar()
+        self.project_path = tk.StringVar()
+        self.project_dirs = [] # List of project directories to be added
+        self.engine_dirs = [] # List of engine directories (from template)
+        self.vector_store_path = tk.StringVar() # Default set in build_config_tab logic or trace
+        
+        self.embed_model = tk.StringVar(value='microsoft/unixcoder-base')
+        self.api_model = tk.StringVar(value='claude-3-haiku-20240307')
+        
+        self.log_queue = queue.Queue()
+        self.root.after(100, self.process_log_queue)
+        
+        self.load_default_engine_dirs()
+        self.create_layout()
+        
+        # Auto-check for existing install on startup and when path changes
+        self.target_dir.trace_add("write", self.check_existing_install)
+        # Auto-update engine list when engine path changes
+        self.engine_path.trace_add("write", lambda *args: self.refresh_engine_list())
+        
+        self.check_existing_install() 
 
-        # Options section
-        options_frame = tk.LabelFrame(content, text="Deployment Options", padx=10, pady=10)
-        options_frame.pack(fill=tk.X, pady=(0, 10))
+    def load_default_engine_dirs(self):
+        template_path = self.source_dir / "src" / "indexing" / "EngineDirs.template.txt"
+        if template_path.exists():
+            with open(template_path, 'r') as f:
+                self.engine_dirs = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        else:
+            self.engine_dirs = []
 
-        tk.Checkbutton(
-            options_frame,
-            text="Enable GPU support (CUDA 12.8)",
-            variable=self.gpu_support
-        ).pack(anchor=tk.W, pady=2)
+    def create_layout(self):
+        Theme.create_header(self.root, "UE5 Source Query", "Setup & Deployment Wizard")
+        
+        container = tk.Frame(self.root, bg=Theme.BG_LIGHT)
+        container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        self.notebook = ttk.Notebook(container)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Tab 1: Deployment
+        self.tab_install = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_install, text="Deployment")
+        self.build_install_tab()
+        
+        # Tab 2: Configuration
+        self.tab_config = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_config, text="Configuration")
+        self.build_config_tab()
+        
+        # Tab 3: Source Manager
+        self.tab_sources = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_sources, text="Source Manager")
+        self.build_sources_tab()
+        
+        # Tab 4: Diagnostics
+        self.tab_diag = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_diag, text="Diagnostics")
+        self.build_diagnostics_tab()
+        
+        # Tab 5: Install
+        self.tab_execute = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_execute, text="Install")
+        self.build_execute_tab()
 
-        tk.Checkbutton(
-            options_frame,
-            text="Build vector index after installation (recommended)",
-            variable=self.build_index
-        ).pack(anchor=tk.W, pady=2)
+    def build_install_tab(self):
+        frame = ttk.Frame(self.tab_install, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Target Directory
+        ttk.Label(frame, text="Where should the tool be installed?", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        
+        dir_frame = ttk.Frame(frame)
+        dir_frame.pack(fill=tk.X, pady=(0, 20))
+        ttk.Entry(dir_frame, textvariable=self.target_dir).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(dir_frame, text="Browse...", command=self.browse_directory).pack(side=tk.LEFT)
+        
+        # Status Indicator
+        self.lbl_install_status = ttk.Label(frame, text="Status: Checking...", font=Theme.FONT_BOLD, foreground="#666")
+        self.lbl_install_status.pack(anchor=tk.W, pady=(0, 20))
 
-        tk.Checkbutton(
-            options_frame,
-            text="Copy configuration from source (.env file)",
-            variable=self.copy_config
-        ).pack(anchor=tk.W, pady=2)
+        # Options
+        ttk.Label(frame, text="Options", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
 
-        tk.Checkbutton(
-            options_frame,
-            text="Update existing installation (preserve data and config)",
-            variable=self.update_existing
-        ).pack(anchor=tk.W, pady=2)
+        # GPU Support
+        gpu_frame = ttk.Frame(frame)
+        gpu_frame.pack(fill=tk.X, anchor=tk.W, pady=(0, 5))
+        self.gpu_checkbox = ttk.Checkbutton(gpu_frame, text="Enable GPU Support (CUDA)", variable=self.gpu_support)
+        self.gpu_checkbox.pack(side=tk.LEFT)
+        ttk.Button(gpu_frame, text="Detect GPU", command=self.detect_gpu).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Prerequisites section
-        prereq_frame = tk.LabelFrame(content, text="System Check", padx=10, pady=10)
-        prereq_frame.pack(fill=tk.X, pady=(0, 10))
+        # GPU Status Label
+        self.lbl_gpu_status = ttk.Label(frame, text="GPU: Not detected yet", font=Theme.FONT_NORMAL, foreground="#666")
+        self.lbl_gpu_status.pack(anchor=tk.W, pady=(0, 10))
 
-        self.prereq_text = scrolledtext.ScrolledText(
-            prereq_frame,
-            height=6,
-            state=tk.DISABLED,
-            wrap=tk.WORD,
-            font=("Consolas", 9)
-        )
-        self.prereq_text.pack(fill=tk.BOTH, expand=True)
+        ttk.Checkbutton(frame, text="Build Index Immediately", variable=self.build_index).pack(anchor=tk.W)
+        ttk.Checkbutton(frame, text="Create Desktop Shortcut", variable=self.create_shortcut).pack(anchor=tk.W)
+        
+        # Note about Diagnostics
+        ttk.Label(frame, text="➡ Go to the 'Diagnostics' tab to verify system requirements.", 
+                 font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(30,0))
 
-        # Progress section
-        progress_frame = tk.LabelFrame(content, text="Installation Progress", padx=10, pady=10)
-        progress_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+    def build_config_tab(self):
+        frame = ttk.Frame(self.tab_config, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="Anthropic API Key", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        ttk.Label(frame, text="Get your API key from: https://console.anthropic.com/settings/keys", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
 
-        self.log_text = scrolledtext.ScrolledText(
-            progress_frame,
-            height=12,
-            state=tk.DISABLED,
-            wrap=tk.WORD,
-            font=("Consolas", 9)
-        )
+        api_frame = ttk.Frame(frame)
+        api_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        self.api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="*")
+        self.api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(api_frame, text="Show", command=self.toggle_api_visibility).pack(side=tk.LEFT)
+        
+        # Vector Storage
+        ttk.Label(frame, text="Vector Storage Directory", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        vec_frame = ttk.Frame(frame)
+        vec_frame.pack(fill=tk.X, pady=(0, 20))
+        ttk.Entry(vec_frame, textvariable=self.vector_store_path).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(vec_frame, text="Browse...", command=self.browse_vector_store).pack(side=tk.LEFT)
+
+        ttk.Label(frame, text="UE5 Engine Path", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        
+        path_frame = ttk.Frame(frame)
+        path_frame.pack(fill=tk.X)
+        self.path_entry = ttk.Entry(path_frame, textvariable=self.engine_path)
+        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
+        ttk.Button(path_frame, text="Browse...", command=self.browse_engine_path).pack(side=tk.LEFT, padx=(0,5))
+        ttk.Button(path_frame, text="Auto-Detect", command=self.auto_detect_engine).pack(side=tk.LEFT)
+
+        # Model Settings
+        ttk.Label(frame, text="Model Settings", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
+        
+        ttk.Label(frame, text="Embedding Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        embed_combo = ttk.Combobox(frame, textvariable=self.embed_model, state='readonly')
+        embed_combo['values'] = ('microsoft/unixcoder-base', 'sentence-transformers/all-MiniLM-L6-v2')
+        embed_combo.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(frame, text="Claude API Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        api_model_combo = ttk.Combobox(frame, textvariable=self.api_model, state='readonly')
+        api_model_combo['values'] = ('claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')
+        api_model_combo.pack(fill=tk.X, pady=(0, 10))
+
+        # Save Button
+        ttk.Button(frame, text="💾 Save Configuration", command=self.save_config_preview, style='Accent.TButton').pack(pady=20)
+
+        # Configuration Log
+        config_log_frame = ttk.LabelFrame(frame, text=" Configuration Preview ", padding=5)
+        config_log_frame.pack(fill=tk.BOTH, expand=True)
+        self.config_preview_text = scrolledtext.ScrolledText(config_log_frame, font=Theme.FONT_MONO, height=5)
+        self.config_preview_text.pack(fill=tk.BOTH, expand=True)
+        self.config_preview_text.insert(tk.END, "Configuration will be saved during installation.\nYou can preview your settings here.")
+        self.config_preview_text.config(state=tk.DISABLED)
+
+    def save_config_preview(self):
+        """Preview configuration that will be saved during installation"""
+        self.config_preview_text.config(state=tk.NORMAL)
+        self.config_preview_text.delete(1.0, tk.END)
+
+        preview = f"""Configuration Preview:
+═══════════════════════════════════════
+API Key: {'*' * (len(self.api_key.get()) if self.api_key.get() else 0)} ({len(self.api_key.get())} chars)
+Vector Store: {self.vector_store_path.get()}
+Engine Path: {self.engine_path.get()}
+Embedding Model: {self.embed_model.get()}
+Claude Model: {self.api_model.get()}
+
+Target Directory: {self.target_dir.get()}
+GPU Support: {'Enabled' if self.gpu_support.get() else 'Disabled'}
+Build Index: {'Yes' if self.build_index.get() else 'No'}
+Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
+═══════════════════════════════════════
+
+✓ Configuration is valid and will be saved during installation.
+"""
+
+        self.config_preview_text.insert(tk.END, preview)
+        self.config_preview_text.config(state=tk.DISABLED)
+        messagebox.showinfo("Configuration Preview", "Configuration looks good!\nIt will be saved when you run the installation.")
+
+    def build_sources_tab(self):
+        # Use PanedWindow for responsive vertical split
+        paned = ttk.PanedWindow(self.tab_sources, orient=tk.VERTICAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # --- Engine Section ---
+        engine_frame = ttk.LabelFrame(paned, text=" Engine Source (Managed) ", padding=15)
+        paned.add(engine_frame, weight=1)
+        
+        ttk.Label(engine_frame, text="Engine Root Directory:", font=Theme.FONT_BOLD).pack(anchor=tk.W)
+        
+        # Read-only entry to show path
+        engine_entry = ttk.Entry(engine_frame, textvariable=self.engine_path, state='readonly')
+        engine_entry.pack(fill=tk.X, pady=(5, 10))
+        
+        ttk.Label(engine_frame, text="Source Directories (Template):").pack(anchor=tk.W)
+        
+        # Listbox for engine dirs
+        e_list_frame = ttk.Frame(engine_frame)
+        e_list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        e_scrollbar = ttk.Scrollbar(e_list_frame)
+        e_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.engine_listbox = tk.Listbox(e_list_frame, yscrollcommand=e_scrollbar.set, font=Theme.FONT_MONO, height=5)
+        self.engine_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        e_scrollbar.config(command=self.engine_listbox.yview)
+        
+        # Buttons
+        e_btn_frame = ttk.Frame(engine_frame)
+        e_btn_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(e_btn_frame, text="+ Add Path", command=self.add_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(e_btn_frame, text="- Remove Selected", command=self.remove_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(e_btn_frame, text="Reset to Default", command=self.reset_engine_dirs).pack(side=tk.LEFT)
+        
+        self.refresh_engine_list()
+
+        # --- Project Section ---
+        project_frame = ttk.LabelFrame(paned, text=" Project Source (Custom) ", padding=15)
+        paned.add(project_frame, weight=1)
+        
+        ttk.Label(project_frame, text="Add folders containing your game project source code.", font=Theme.FONT_NORMAL).pack(anchor=tk.W, pady=(0,10))
+        
+        # Listbox for projects
+        list_frame = ttk.Frame(project_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.project_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=Theme.FONT_MONO, height=5)
+        self.project_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.project_listbox.yview)
+        
+        # Buttons
+        btn_frame = ttk.Frame(project_frame)
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(btn_frame, text="+ Add Folder", command=self.add_project_folder, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="+ Add .uproject", command=self.add_uproject, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="- Remove Selected", command=self.remove_project_folder).pack(side=tk.LEFT)
+
+        self.refresh_project_list()
+
+    def refresh_engine_list(self):
+        self.engine_listbox.delete(0, tk.END)
+        engine_root = self.engine_path.get().strip()
+        for d in self.engine_dirs:
+            if engine_root and "{ENGINE_ROOT}" in d:
+                resolved = d.replace("{ENGINE_ROOT}", engine_root)
+                self.engine_listbox.insert(tk.END, resolved)
+            else:
+                self.engine_listbox.insert(tk.END, d)
+
+    def add_engine_dir(self):
+        engine_root = self.engine_path.get().strip()
+        initial_dir = engine_root if engine_root and Path(engine_root).exists() else "/"
+        
+        d = filedialog.askdirectory(initialdir=initial_dir)
+        if d:
+            # Normalize path
+            path_obj = Path(d)
+            path_str = str(path_obj)
+            
+            # Try to replace engine root with placeholder
+            if engine_root:
+                root_obj = Path(engine_root)
+                try:
+                    rel_path = path_obj.relative_to(root_obj)
+                    path_str = str(Path("{ENGINE_ROOT}") / rel_path)
+                except ValueError:
+                    pass
+            
+            if path_str not in self.engine_dirs:
+                self.engine_dirs.append(path_str)
+                self.refresh_engine_list()
+
+    def remove_engine_dir(self):
+        sel = self.engine_listbox.curselection()
+        if sel:
+            idx = sel[0]
+            path = self.engine_listbox.get(idx)
+            if messagebox.askyesno("Confirm", f"Remove '{path}' from list?"):
+                self.engine_dirs.pop(idx)
+                self.refresh_engine_list()
+
+    def reset_engine_dirs(self):
+        if messagebox.askyesno("Confirm", "Reset engine source list to defaults?"):
+            self.load_default_engine_dirs()
+            self.refresh_engine_list()
+
+    def build_execute_tab(self):
+        frame = ttk.Frame(self.tab_execute, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.btn_install = ttk.Button(frame, text="▶ Start Installation", command=self.start_install, style="Accent.TButton")
+        self.btn_install.pack(pady=(0, 20))
+        
+        self.progress = ttk.Progressbar(frame, mode='determinate')
+        self.progress.pack(fill=tk.X, pady=(0, 10))
+        
+        self.log_text = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, height=15)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Progress bar with percentage
-        progress_bar_frame = tk.Frame(content)
-        progress_bar_frame.pack(fill=tk.X, pady=(0, 15))
+    def toggle_api_visibility(self):
+        if self.api_key_entry['show'] == '*':
+            self.api_key_entry.config(show='')
+        else:
+            self.api_key_entry.config(show='*')
 
-        self.progress = ttk.Progressbar(progress_bar_frame, mode='determinate', maximum=100)
-        self.progress.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=(0, 10))
+    def browse_vector_store(self):
+        d = filedialog.askdirectory(initialdir=self.vector_store_path.get())
+        if d: self.vector_store_path.set(d)
 
-        self.progress_label = tk.Label(progress_bar_frame, text="0%", font=("Arial", 10, "bold"), width=6)
-        self.progress_label.pack(side=tk.LEFT)
+    def detect_gpu(self):
+        """Detect NVIDIA GPU and display information"""
+        self.lbl_gpu_status.config(text="Detecting GPU...", foreground="#666")
+        self.root.update()
+
+        gpu_info = detect_nvidia_gpu()
+
+        if gpu_info:
+            self.gpu_info = get_gpu_summary()
+            status_text = f"GPU: {gpu_info.name} ({gpu_info.sm_version}, CUDA {gpu_info.cuda_version_required}+ required)"
+            self.lbl_gpu_status.config(text=status_text, foreground=Theme.SUCCESS)
+            self.gpu_support.set(True)  # Auto-enable if GPU found
+            messagebox.showinfo("GPU Detected", get_gpu_requirements_text())
+        else:
+            self.gpu_info = None
+            self.lbl_gpu_status.config(text="GPU: No NVIDIA GPU detected", foreground=Theme.ERROR)
+            self.gpu_support.set(False)
+            messagebox.showwarning("No GPU", "No NVIDIA GPU detected. GPU acceleration will not be available.")
+
+    def browse_engine_path(self):
+        directory = filedialog.askdirectory(
+            title="Select UE5 Engine Directory",
+            initialdir=self.engine_path.get() or "C:/Program Files/Epic Games"
+        )
+        if directory:
+            path = Path(directory)
+            if path.name == "Engine":
+                self.engine_path.set(str(path))
+            elif (path / "Engine").exists():
+                self.engine_path.set(str(path / "Engine"))
+            else:
+                self.engine_path.set(directory)
 
     def browse_directory(self):
-        """Browse for target directory"""
-        directory = filedialog.askdirectory(title="Select Deployment Directory")
-        if directory:
-            self.target_dir.set(directory)
+        d = filedialog.askdirectory(initialdir=self.target_dir.get())
+        if d: self.target_dir.set(d)
+
+    def check_existing_install(self, *args):
+        target = Path(self.target_dir.get())
+        
+        # Set default vector store path based on target
+        default_vec_path = target / "data"
+        
+        if not target.exists():
+            self.lbl_install_status.config(text="Status: New Installation", foreground=Theme.SUCCESS)
+            self.update_existing.set(False)
+            self.btn_install.config(text="▶ Start Installation")
+            self.vector_store_path.set(str(default_vec_path))
+            return
+
+        # Check for signs of installation
+        has_venv = (target / ".venv").exists()
+        has_config = (target / "config" / ".env").exists()
+        
+        if has_venv and has_config:
+            self.lbl_install_status.config(text="Status: Existing Installation Detected (Will Update)", foreground=Theme.WARNING)
+            self.update_existing.set(True)
+            self.btn_install.config(text="▶ Start Update")
+            # Try to load existing config
+            try:
+                cm = ConfigManager(target) # ConfigManager expects root containing config/.env
+                if cm.get("ANTHROPIC_API_KEY"):
+                    self.api_key.set(cm.get("ANTHROPIC_API_KEY"))
+                
+                # Load vector dir
+                vec_dir = cm.get("VECTOR_OUTPUT_DIR")
+                if vec_dir:
+                    self.vector_store_path.set(vec_dir)
+                else:
+                    self.vector_store_path.set(str(default_vec_path))
+                    
+                # Load models
+                if cm.get("EMBED_MODEL"):
+                    self.embed_model.set(cm.get("EMBED_MODEL"))
+                if cm.get("ANTHROPIC_MODEL"):
+                    self.api_model.set(cm.get("ANTHROPIC_MODEL"))
+            except:
+                self.vector_store_path.set(str(default_vec_path))
+        else:
+            self.lbl_install_status.config(text="Status: Directory Exists (Clean Install)", foreground="#666")
+            self.update_existing.set(False)
+            self.btn_install.config(text="▶ Start Installation")
+            self.vector_store_path.set(str(default_vec_path))
 
     def browse_project(self):
-        """Browse for .uproject file"""
-        file_path = filedialog.askopenfilename(
-            title="Select Game Project",
-            filetypes=[("Unreal Project", "*.uproject"), ("All Files", "*.*")]
-        )
-        if file_path:
-            self.project_path.set(file_path)
+        f = filedialog.askopenfilename(filetypes=[("Unreal Project", "*.uproject")])
+        if f: self.project_path.set(f)
 
-    def log(self, message):
-        """Add message to log queue"""
-        self.log_queue.put(message)
+    def build_diagnostics_tab(self):
+        frame = ttk.Frame(self.tab_diag, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Action Bar
+        action_frame = ttk.Frame(frame)
+        action_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(action_frame, text="Pre-flight System Check", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
+        
+        btn_run = ttk.Button(action_frame, text="▶ Run Checks", command=self.run_diagnostics, style="Accent.TButton")
+        btn_run.pack(side=tk.RIGHT)
+        
+        # Output Area
+        self.diag_log = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, state=tk.DISABLED)
+        self.diag_log.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_diag("Ready to check system requirements.\nClick 'Run Checks' to begin.")
 
-    def process_log_queue(self):
-        """Process log messages from queue"""
+    def log_diag(self, message, clear=False, append=False):
+        self.diag_log.config(state=tk.NORMAL)
+        if clear:
+            self.diag_log.delete(1.0, tk.END)
+        self.diag_log.insert(tk.END, message + ("\n" if not message.endswith("\n") else ""))
+        self.diag_log.see(tk.END)
+        self.diag_log.config(state=tk.DISABLED)
+
+    def run_diagnostics(self):
+        self.log_diag("Running pre-flight checks...", clear=True)
+        
+        def _check():
+            all_passed = True
+            
+            # 1. Python Check
+            try:
+                ver = sys.version_info
+                if ver >= (3, 8):
+                    self.root.after(0, lambda: self.log_diag(f"[OK] Python {ver.major}.{ver.minor}.{ver.micro}", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag(f"[FAIL] Python {ver.major}.{ver.minor} (Need 3.8+)", append=True))
+                    all_passed = False
+            except Exception as e:
+                self.root.after(0, lambda: self.log_diag(f"[ERR] Python check failed: {e}", append=True))
+                all_passed = False
+
+            # 2. Pip Check
+            try:
+                res = subprocess.run([sys.executable, "-m", "pip", "--version"], capture_output=True, text=True)
+                if res.returncode == 0:
+                    self.root.after(0, lambda: self.log_diag("[OK] Pip is available", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag("[FAIL] Pip not found", append=True))
+                    all_passed = False
+            except:
+                self.root.after(0, lambda: self.log_diag("[FAIL] Pip check failed", append=True))
+                all_passed = False
+
+            # 3. Disk Space
+            try:
+                target = Path(self.target_dir.get())
+                drive = target.anchor
+                total, used, free = shutil.disk_usage(drive)
+                free_gb = free / (1024**3)
+                if free_gb > 1.0:
+                    self.root.after(0, lambda: self.log_diag(f"[OK] Disk Space: {free_gb:.1f} GB free", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag(f"[WARN] Low Disk Space: {free_gb:.1f} GB", append=True))
+            except:
+                pass
+
+            # 4. Write Permissions
+            try:
+                target = Path(self.target_dir.get())
+                if not target.exists():
+                    target.mkdir(parents=True, exist_ok=True)
+                    temp_file = target / ".write_test"
+                    temp_file.touch()
+                    temp_file.unlink()
+                    # Clean up if we created it new
+                    if not any(target.iterdir()):
+                        target.rmdir()
+                else:
+                    temp_file = target / ".write_test"
+                    temp_file.touch()
+                    temp_file.unlink()
+                self.root.after(0, lambda: self.log_diag("[OK] Write permissions verified", append=True))
+            except Exception as e:
+                self.root.after(0, lambda: self.log_diag(f"[FAIL] No write permission: {e}", append=True))
+                all_passed = False
+
+            # 5. GPU Check (optional)
+            try:
+                gpu_info = detect_nvidia_gpu()
+                if gpu_info:
+                    gpu_summary = get_gpu_summary()
+                    self.root.after(0, lambda: self.log_diag(f"[INFO] GPU: {gpu_info.name}", append=True))
+                    self.root.after(0, lambda: self.log_diag(f"[INFO] Compute: {gpu_info.compute_capability_str} ({gpu_info.sm_version})", append=True))
+                    self.root.after(0, lambda: self.log_diag(f"[INFO] CUDA Required: {gpu_info.cuda_version_required}+", append=True))
+
+                    if gpu_summary["cuda_installed"]:
+                        self.root.after(0, lambda: self.log_diag(f"[INFO] CUDA Installed: {gpu_summary['cuda_installed']}", append=True))
+                        if gpu_summary["cuda_compatible"]:
+                            self.root.after(0, lambda: self.log_diag("[OK] CUDA version compatible", append=True))
+                        else:
+                            self.root.after(0, lambda: self.log_diag("[WARN] CUDA version too old", append=True))
+                    else:
+                        self.root.after(0, lambda: self.log_diag("[INFO] CUDA not installed (optional for GPU)", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag("[INFO] No NVIDIA GPU detected (optional)", append=True))
+            except:
+                pass
+
+            if all_passed:
+                self.root.after(0, lambda: self.log_diag("\n[SUCCESS] All checks passed. Ready to install.", append=True))
+            else:
+                self.root.after(0, lambda: self.log_diag("\n[WARNING] Some checks failed. Installation may not work.", append=True))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def add_uproject(self):
+        f = filedialog.askopenfilename(filetypes=[("Unreal Project", "*.uproject")])
+        if f:
+            source_dir = resolve_uproject_source(f)
+            if source_dir:
+                self.add_project_dir_to_list(source_dir)
+            else:
+                messagebox.showwarning("Warning", f"No 'Source' folder found for project: {f}")
+
+    def add_project_folder(self):
+        d = filedialog.askdirectory()
+        if d:
+            self.add_project_dir_to_list(d)
+
+    def add_project_dir_to_list(self, path):
+        if path not in self.project_dirs:
+            self.project_dirs.append(path)
+            self.project_listbox.insert(tk.END, path)
+
+    def remove_project_folder(self):
+        sel = self.project_listbox.curselection()
+        if sel:
+            idx = sel[0]
+            path = self.project_listbox.get(idx)
+            if messagebox.askyesno("Confirm", f"Remove '{path}' from list?"):
+                self.project_listbox.delete(idx)
+                self.project_dirs.pop(idx)
+
+    def refresh_project_list(self):
+        self.project_listbox.delete(0, tk.END)
+        for p in self.project_dirs:
+            self.project_listbox.insert(tk.END, p)
+
+    def auto_detect_engine(self):
+        self.log("Detecting UE5 installations...")
+        self.path_entry.config(state=tk.DISABLED)
+
+        def detect():
+            try:
+                installations = get_available_engines(self.source_dir)
+
+                if not installations:
+                    self.root.after(0, lambda: self.log("! No UE5 installation detected"))
+                    self.root.after(0, lambda: messagebox.showwarning(
+                        "Not Found",
+                        "Could not auto-detect UE5. Please browse manually."
+                    ))
+                    return
+
+                if len(installations) == 1:
+                    path = installations[0]['engine_root']
+                    version = installations[0]['version']
+                    self.root.after(0, lambda: self.engine_path.set(path))
+                    self.root.after(0, lambda: self.log(f"✓ Detected {version}: {path}"))
+                else:
+                    self.root.after(0, lambda: self.show_version_selector(installations))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log(f"✗ Detection failed: {err}"))
+                self.root.after(0, lambda err=str(e): messagebox.showerror("Error", f"Auto-detection failed:\n{err}"))
+            finally:
+                self.root.after(0, lambda: self.path_entry.config(state=tk.NORMAL))
+
+        threading.Thread(target=detect, daemon=True).start()
+
+    def show_version_selector(self, installs):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Select UE5 Version")
+        dialog.geometry("500x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self.root.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Multiple UE5 versions found. Select one:", font=Theme.FONT_BOLD).pack(pady=10)
+        
+        listbox = tk.Listbox(dialog, font=Theme.FONT_NORMAL)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        
+        for inst in installs:
+            listbox.insert(tk.END, f"{inst['version']} - {inst['engine_root']}")
+            
+        def on_select():
+            sel = listbox.curselection()
+            if sel:
+                selected = installs[sel[0]]
+                self.engine_path.set(selected['engine_root'])
+                self.log(f"✓ Selected: {selected['version']}")
+                self.log(f"  Engine Path: {selected['engine_root']}")
+                dialog.destroy()
+                
+        ttk.Button(dialog, text="Select", command=on_select).pack(pady=10)
+
+    def start_install(self):
+        self.btn_install.config(state=tk.DISABLED)
+        self.notebook.select(self.tab_execute)
+        threading.Thread(target=self.run_install_process, daemon=True).start()
+
+    def _create_windows_shortcut(self, target, shortcut_path, working_dir="", icon=None):
+        """Create a Windows shortcut (.lnk) using VBScript"""
+        vbs_script = f"""
+        Set oWS = WScript.CreateObject(\"WScript.Shell\")
+        Set oLink = oWS.CreateShortcut(\"{shortcut_path}\")
+        oLink.TargetPath = \"{target}\"
+        oLink.WorkingDirectory = \"{working_dir}\"
+        oLink.Save
+        """
+        vbs_file = Path(os.environ["TEMP"]) / "create_shortcut.vbs"
         try:
-            while True:
-                message = self.log_queue.get_nowait()
-                self.log_text.config(state=tk.NORMAL)
-                self.log_text.insert(tk.END, message + "\n")
-                self.log_text.see(tk.END)
-                self.log_text.config(state=tk.DISABLED)
-        except queue.Empty:
-            pass
+            vbs_file.write_text(vbs_script)
+            subprocess.run(["cscript", "//Nologo", str(vbs_file)], check=True)
         finally:
-            self.root.after(100, self.process_log_queue)
+            if vbs_file.exists():
+                vbs_file.unlink()
 
-    def update_progress(self, step, message):
-        """Update progress bar"""
-        self.current_step = step
-        percentage = int((step / self.total_steps) * 100)
-        self.progress['value'] = percentage
-        self.progress_label.config(text=f"{percentage}%")
-        self.log(f"[{step}/{self.total_steps}] {message}")
-
-    def check_prerequisites(self):
-        """Check system prerequisites"""
-        prereqs = []
-        all_checks_passed = True
-
-        # Check Python version
-        if sys.version_info >= (3, 8):
-            prereqs.append("[OK] Python " + ".".join(map(str, sys.version_info[:3])))
-        else:
-            prereqs.append(f"[X] Python {sys.version_info.major}.{sys.version_info.minor} (need 3.8+)")
-            all_checks_passed = False
-
-        # Check disk space
-        try:
-            import shutil as sh
-            total, used, free = sh.disk_usage(str(Path.home()))
-            free_gb = free / (1024 ** 3)
-            if free_gb >= 0.5:
-                prereqs.append(f"[OK] Disk space: {free_gb:.1f} GB free")
-            else:
-                prereqs.append(f"[!] Low disk space: {free_gb:.1f} GB (need 500 MB)")
-        except Exception:
-            pass  # Not critical
-
-        # Check source files
-        required_files = {
-            "src/core/hybrid_query.py": "Core query engine",
-            "src/indexing/build_embeddings.py": "Vector indexer",
-            "src/utils/verify_installation.py": "Health checks",
-            "requirements.txt": "Dependencies list",
-            "tools/health-check.bat": "Health check script"
-        }
-
-        missing = []
-        for file, description in required_files.items():
-            if not (self.source_dir / file).exists():
-                missing.append(f"{file} ({description})")
-
-        if missing:
-            prereqs.append(f"[X] Missing files:")
-            for m in missing[:3]:  # Show first 3
-                prereqs.append(f"    - {m}")
-            if len(missing) > 3:
-                prereqs.append(f"    ... and {len(missing)-3} more")
-            all_checks_passed = False
-        else:
-            prereqs.append("[OK] All required source files present")
-
-        # Check pip
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "--version"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                prereqs.append("[OK] pip available")
-            else:
-                prereqs.append("[X] pip not available")
-                all_checks_passed = False
-        except Exception:
-            prereqs.append("[X] pip not available")
-            all_checks_passed = False
-
-        # Update prerequisites display
-        self.prereq_text.config(state=tk.NORMAL)
-        self.prereq_text.delete("1.0", tk.END)
-        self.prereq_text.insert(tk.END, "\n".join(prereqs))
-        self.prereq_text.config(state=tk.DISABLED)
-
-        # Disable install button if critical checks failed
-        if not all_checks_passed:
-            self.install_btn.config(state=tk.DISABLED, text="✗ Prerequisites Not Met")
-
-    def check_existing_installation(self, target):
-        """Check if target already has an installation"""
-        if not target.exists():
-            return False, None
-
-        # Check for key markers of existing installation
-        markers = [
-            target / ".venv",
-            target / "config" / ".env",
-            target / "data" / "vector_store.npz"
-        ]
-
-        existing_features = []
-        if markers[0].exists():
-            existing_features.append("virtual environment")
-        if markers[1].exists():
-            existing_features.append("configuration")
-        if markers[2].exists():
-            existing_features.append("vector store")
-
-        if existing_features:
-            return True, existing_features
-        return False, None
-
-    def start_installation(self):
-        """Start installation in background thread"""
-        target = Path(self.target_dir.get())
-
-        # Check for existing installation
-        is_existing, features = self.check_existing_installation(target)
-
-        if is_existing and not self.update_existing.get():
-            response = messagebox.askyesno(
-                "Existing Installation Found",
-                f"Found existing installation at:\n{target}\n\n"
-                f"Existing components:\n" + "\n".join(f"  • {f}" for f in features) + "\n\n"
-                f"Do you want to UPDATE this installation?\n"
-                f"(Selecting 'No' will abort deployment)",
-                icon='warning'
-            )
-
-            if not response:
-                self.log("Deployment cancelled by user (existing installation)")
-                return
-
-            self.update_existing.set(True)
-            self.log("Updating existing installation...")
-
-        self.install_btn.config(state=tk.DISABLED)
-        self.update_progress(0, "Starting deployment...")
-
-        thread = threading.Thread(target=self.run_installation, daemon=True)
-        thread.start()
-
-    def run_installation(self):
-        """Execute installation steps"""
+    def run_install_process(self):
         try:
             target = Path(self.target_dir.get())
-            is_update = self.update_existing.get()
-
-            self.log("="*60)
-            self.log("UE5 Source Query Tool - Deployment" + (" (UPDATE)" if is_update else ""))
-            self.log("="*60)
-            self.log(f"Target: {target}")
-            self.log(f"GPU Support: {self.gpu_support.get()}")
-            self.log(f"Build Index: {self.build_index.get()}")
-            self.log("")
-
-            # Step 1: Create directory structure
-            self.update_progress(1, "Creating directory structure...")
+            self.log(f"Installing to: {target}")
+            
+            # 1. Copy Files
+            self.log("Copying files...")
             target.mkdir(parents=True, exist_ok=True)
+            
+            # Use simplified copy logic similar to previous script
+            # Copy src, config, tools, docs
+            for item in ["src", "config", "tools", "docs", "ask.bat", "launcher.bat", "requirements.txt"]:
+                src = self.source_dir / item
+                dst = target / item
+                if src.is_dir():
+                    if dst.exists(): shutil.rmtree(dst)
+                    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+                elif src.is_file():
+                    shutil.copy2(src, dst)
+            
+            # 2. Write Configuration
+            self.log("Configuring...")
+            env_path = target / "config" / ".env"
+            with open(env_path, 'w') as f:
+                f.write(f"ANTHROPIC_API_KEY={self.api_key.get()}\n")
+                f.write(f"VECTOR_OUTPUT_DIR={self.vector_store_path.get()}\n")
+                f.write(f"UE_ENGINE_ROOT={self.engine_path.get()}\n")
+                f.write(f"EMBED_MODEL={self.embed_model.get()}\n")
+                f.write(f"ANTHROPIC_MODEL={self.api_model.get()}\n")
+            
+            # 3. Create EngineDirs.txt
+            if self.engine_path.get() and self.engine_dirs:
+                self.log("Configuring Engine directories...")
+                engine_root = self.engine_path.get().rstrip('/\\')
+                output = target / "src" / "indexing" / "EngineDirs.txt"
 
-            subdirs = [
-                "src/core", "src/indexing", "src/utils", "src/management",
-                "config", "data", "logs", "docs", "tools", "tools/cli", "installer"
-            ]
-            for subdir in subdirs:
-                (target / subdir).mkdir(parents=True, exist_ok=True)
-            self.log("  ✓ Directory structure created")
+                # Validate engine root exists
+                if not Path(engine_root).exists():
+                    self.log(f"⚠ WARNING: Engine path does not exist: {engine_root}")
+                    self.log("  Index building may fail. Please verify the engine path.")
 
-            # Step 2: Copy source files
-            self.update_progress(2, "Copying source files...")
+                valid_paths = 0
+                invalid_paths = []
 
-            # Copy all Python files from src/ subdirectories
-            for src_subdir in ["core", "indexing", "utils", "management"]:
-                src_path = self.source_dir / "src" / src_subdir
-                if src_path.exists():
-                    dst_path = target / "src" / src_subdir
-                    dst_path.mkdir(parents=True, exist_ok=True)
+                with open(output, 'w') as f:
+                    f.write(f"# Auto-generated for Engine Root: {engine_root}\n")
+                    for d in self.engine_dirs:
+                        resolved = d.replace("{ENGINE_ROOT}", engine_root)
+                        f.write(f"{resolved}\n")
 
-                    for file in src_path.glob("*.py"):
-                        shutil.copy2(file, dst_path / file.name)
-                        self.log(f"    → {src_subdir}/{file.name}")
-
-                    # Copy template and example files for indexing
-                    if src_subdir == "indexing":
-                        for file in src_path.glob("*.txt"):
-                            if file.name != "EngineDirs.txt":  # Don't copy machine-specific
-                                shutil.copy2(file, dst_path / file.name)
-                                self.log(f"    → {src_subdir}/{file.name}")
-
-            self.log("  ✓ Source files copied")
-
-            # Step 3: Copy installer
-            self.update_progress(3, "Copying installer components...")
-
-            installer_src = self.source_dir / "installer"
-            installer_dst = target / "installer"
-            if installer_src.exists():
-                for file in installer_src.glob("*.py"):
-                    shutil.copy2(file, installer_dst / file.name)
-                    self.log(f"    → installer/{file.name}")
-
-            # Copy install.bat to target root
-            install_bat_src = self.source_dir / "install.bat"
-            if install_bat_src.exists():
-                shutil.copy2(install_bat_src, target / "install.bat")
-                self.log("    → install.bat")
-
-            self.log("  ✓ Installer components copied")
-
-            # Step 4: Copy documentation
-            self.update_progress(4, "Copying documentation...")
-            docs_src = self.source_dir / "docs"
-            docs_dst = target / "docs"
-
-            if docs_src.exists():
-                for file in docs_src.glob("*.md"):
-                    shutil.copy2(file, docs_dst / file.name)
-
-            # Copy main README
-            if (self.source_dir / "README.md").exists():
-                shutil.copy2(self.source_dir / "README.md", target / "README.md")
-
-            self.log("  ✓ Documentation copied")
-
-            # Step 5: Copy entry point scripts
-            self.update_progress(5, "Copying entry point scripts...")
-
-            # Root scripts
-            root_scripts = ["ask.bat"]
-            for script in root_scripts:
-                src_file = self.source_dir / script
-                if src_file.exists():
-                    shutil.copy2(src_file, target / script)
-                    self.log(f"    → {script}")
-
-            # Tools directory scripts
-            tools_scripts = [
-                "health-check.bat", "rebuild-index.bat", "fix-paths.bat",
-                "add-directory.bat", "setup-git-lfs.bat", "manage.bat",
-                "manage-directories.bat", "update.bat"
-            ]
-
-            for script in tools_scripts:
-                src_file = self.source_dir / "tools" / script
-                if src_file.exists():
-                    shutil.copy2(src_file, target / "tools" / script)
-                    self.log(f"    → tools/{script}")
-
-            # CLI tools directory
-            cli_dir = self.source_dir / "tools" / "cli"
-            if cli_dir.exists():
-                for file in cli_dir.glob("*.bat"):
-                    shutil.copy2(file, target / "tools" / "cli" / file.name)
-                    self.log(f"    → tools/cli/{file.name}")
-                # Copy CLI README
-                if (cli_dir / "README.md").exists():
-                    shutil.copy2(cli_dir / "README.md", target / "tools" / "cli" / "README.md")
-
-            # Copy tools README
-            if (self.source_dir / "tools" / "README.md").exists():
-                shutil.copy2(self.source_dir / "tools" / "README.md", target / "tools" / "README.md")
-
-            # Copy requirements
-            shutil.copy2(self.source_dir / "requirements.txt", target / "requirements.txt")
-            if (self.source_dir / "requirements-gpu.txt").exists():
-                shutil.copy2(self.source_dir / "requirements-gpu.txt", target / "requirements-gpu.txt")
-
-            # Copy .gitignore
-            if (self.source_dir / ".gitignore").exists():
-                shutil.copy2(self.source_dir / ".gitignore", target / ".gitignore")
-
-            self.log("  ✓ Scripts copied")
-
-            # Step 6: Copy/create configuration
-            if self.copy_config.get() and not is_update:
-                self.log("[6/8] Copying configuration...")
-                src_config = self.source_dir / "config" / ".env"
-                if src_config.exists():
-                    shutil.copy2(src_config, target / "config" / ".env")
-                    self.log("  ✓ Configuration copied")
-                else:
-                    self.log("  ! Source .env not found, will need to run configure.bat")
-            elif is_update:
-                self.log("[6/8] Preserving existing configuration...")
-                self.log("  ✓ Configuration preserved")
-            else:
-                self.log("[6/8] Skipping configuration copy")
-
-            # Step 6.5: Configure Project Source (New)
-            project_path_str = self.project_path.get().strip()
-            if project_path_str:
-                self.log("  Configuring Project Source...")
-                try:
-                    uproject = Path(project_path_str)
-                    if uproject.exists():
-                        project_root = uproject.parent
-                        source_dir = project_root / "Source"
-                        if source_dir.exists() and source_dir.is_dir():
-                            project_dirs_file = target / "src" / "indexing" / "ProjectDirs.txt"
-                            project_dirs_file.parent.mkdir(parents=True, exist_ok=True)
-                            with open(project_dirs_file, 'w') as f:
-                                f.write("# Auto-generated Project Directories\n")
-                                f.write(f"{source_dir}\n")
-                            self.log(f"  ✓ Added project source: {source_dir}")
+                        # Validate path exists
+                        if Path(resolved).exists():
+                            valid_paths += 1
                         else:
-                            self.log(f"  ! Warning: 'Source' folder not found in {project_root}")
-                    else:
-                        self.log(f"  ! Warning: .uproject file not found at {uproject}")
-                except Exception as e:
-                    self.log(f"  ! Error configuring project source: {e}")
+                            invalid_paths.append(resolved)
 
-            # Step 7: Create virtual environment and install packages
-            venv_path = target / ".venv"
+                self.log(f"✓ Wrote {len(self.engine_dirs)} engine source paths to EngineDirs.txt")
+                self.log(f"  Valid paths: {valid_paths}, Invalid paths: {len(invalid_paths)}")
 
-            if not venv_path.exists() or not is_update:
-                self.update_progress(6, "Creating Python virtual environment...")
-
-                result = subprocess.run(
-                    [sys.executable, "-m", "venv", str(venv_path)],
-                    capture_output=True,
-                    text=True
-                )
-
-                if result.returncode != 0:
-                    raise Exception(f"Failed to create venv: {result.stderr}")
-
-                self.log("  ✓ Virtual environment created")
+                if invalid_paths:
+                    self.log("⚠ WARNING: Some engine paths do not exist:")
+                    for p in invalid_paths[:5]:  # Show first 5
+                        self.log(f"  - {p}")
+                    if len(invalid_paths) > 5:
+                        self.log(f"  ... and {len(invalid_paths) - 5} more")
             else:
-                self.update_progress(6, "Using existing virtual environment...")
-                self.log("  ✓ Existing virtual environment preserved")
+                self.log("⚠ WARNING: No engine path configured - index will be empty!")
+                self.log("  Go to Configuration tab and set Engine Path before building index.")
+            
+            # 4. Create ProjectDirs.txt
+            project_dirs_final = list(self.project_dirs)
+            
+            # Add the single one if specified via simple browse
+            if self.project_path.get():
+                p = self.project_path.get()
+                if p.lower().endswith(".uproject"):
+                    src = resolve_uproject_source(p)
+                    if src and src not in project_dirs_final:
+                        project_dirs_final.append(src)
+                elif Path(p).is_dir() and p not in project_dirs_final:
+                    project_dirs_final.append(p)
 
-            # Install packages
-            self.log("  Installing Python packages (this may take a few minutes)...")
-            pip_exe = venv_path / "Scripts" / "pip.exe"
+            if project_dirs_final:
+                self.log(f"Configuring {len(project_dirs_final)} project directories...")
+                with open(target / "src" / "indexing" / "ProjectDirs.txt", 'w') as f:
+                    f.write("# Auto-generated Project Directories\n")
+                    for p in project_dirs_final:
+                        f.write(f"{p}\n")
+            
+            # 5. Create Venv & Install
+            self.log("Creating Virtual Environment (this takes time)...")
+            subprocess.run([sys.executable, "-m", "venv", str(target / ".venv")])
+            
+            pip = target / ".venv" / "Scripts" / "pip.exe"
+            self.log("Installing dependencies...")
+            subprocess.run([str(pip), "install", "-r", str(target / "requirements.txt")])
 
-            requirements_file = "requirements-gpu.txt" if self.gpu_support.get() else "requirements.txt"
+            # 5b. GPU Support - Install CUDA and GPU-accelerated packages
+            if self.gpu_support.get():
+                self.log("GPU Support enabled - checking CUDA...")
 
-            result = subprocess.run(
-                [str(pip_exe), "install", "-r", str(target / requirements_file), "--quiet"],
-                capture_output=True,
-                text=True,
-                cwd=str(target)
-            )
+                if not self.gpu_info:
+                    self.gpu_info = get_gpu_summary()
 
-            if result.returncode != 0:
-                self.log(f"  ! Warning: Package installation had errors")
-                self.log(f"    {result.stderr[:300]}")
-            else:
-                self.log("  ✓ Packages installed")
+                if self.gpu_info["has_nvidia_gpu"]:
+                    cuda_required = self.gpu_info["cuda_required"]
+                    cuda_installed = self.gpu_info["cuda_installed"]
 
-            # Step 8: Build index if requested
+                    # Check if CUDA needs to be installed
+                    if self.gpu_info["needs_cuda_install"]:
+                        self.log(f"CUDA {cuda_required} is required but not installed.")
+                        response = messagebox.askyesno(
+                            "CUDA Installation Required",
+                            f"Your {self.gpu_info['gpu_name']} requires CUDA {cuda_required}.\n\n"
+                            f"Would you like to download and install CUDA now?\n"
+                            f"(This may take 15-30 minutes)\n\n"
+                            f"If you skip this, GPU acceleration will not work."
+                        )
+
+                        if response:
+                            self.log(f"Downloading CUDA {cuda_required}...")
+                            self.log("NOTE: CUDA installation will request administrator privileges.")
+                            download_url = self.gpu_info["download_url"]
+
+                            def progress_cb(downloaded, total):
+                                if total > 0:
+                                    pct = (downloaded / total) * 100
+                                    self.root.after(0, lambda: self.log(f"  Download progress: {pct:.1f}%"))
+
+                            def status_cb(msg):
+                                self.root.after(0, lambda: self.log(f"  {msg}"))
+
+                            # Run CUDA installation in a separate thread
+                            def install_cuda_thread():
+                                success = install_cuda_with_progress(download_url, progress_cb, status_cb)
+
+                                if success:
+                                    self.root.after(0, lambda: self.log("✓ CUDA installed successfully!"))
+                                    self.root.after(0, lambda: messagebox.showinfo(
+                                        "CUDA Installed",
+                                        f"CUDA {cuda_required} has been installed successfully.\n\n"
+                                        "You may need to restart your computer for changes to take effect."
+                                    ))
+                                else:
+                                    self.root.after(0, lambda: self.log("✗ CUDA installation failed or was cancelled."))
+                                    self.root.after(0, lambda: messagebox.showwarning(
+                                        "CUDA Installation",
+                                        f"CUDA installation failed.\n\n"
+                                        f"You can install CUDA {cuda_required} manually from:\n"
+                                        f"{download_url}\n\n"
+                                        "GPU-accelerated packages will still be installed."
+                                    ))
+
+                            threading.Thread(target=install_cuda_thread, daemon=True).start()
+
+                            # Wait a moment for thread to start
+                            import time
+                            time.sleep(2)
+                        else:
+                            self.log("Skipping CUDA installation. GPU support will be limited.")
+                            messagebox.showinfo(
+                                "CUDA Required",
+                                f"To enable GPU acceleration, please install CUDA {cuda_required} manually:\n\n"
+                                f"{download_url}\n\n"
+                                "GPU-accelerated packages will be installed, but won't work until CUDA is installed."
+                            )
+
+                    # Install GPU-accelerated Python packages
+                    self.log("Installing GPU-accelerated packages...")
+                    gpu_req_file = target / "requirements-gpu.txt"
+                    create_gpu_requirements_file(gpu_req_file, cuda_required)
+                    subprocess.run([str(pip), "install", "-r", str(gpu_req_file)])
+                    self.log("✓ GPU packages installed")
+                else:
+                    self.log("No NVIDIA GPU detected. Skipping GPU setup.")
+
             if self.build_index.get():
-                self.update_progress(7, "Building vector index...")
-                self.log("  This may take 5-15 minutes depending on your system...")
-
-                # Check if configuration exists
-                config_file = target / "config" / ".env"
-                engine_dirs_file = target / "src" / "indexing" / "EngineDirs.txt"
-
-                if not config_file.exists():
-                    self.log("  ! Configuration not found, skipping index build")
-                    self.log("  ! Run configure.bat then tools\\rebuild-index.bat manually")
-                elif not engine_dirs_file.exists():
-                    self.log("  ! EngineDirs.txt not found, skipping index build")
-                    self.log("  ! Run tools\\fix-paths.bat then tools\\rebuild-index.bat manually")
-                else:
-                    # Run index building
-                    python_exe = venv_path / "Scripts" / "python.exe"
-                    build_script = target / "src" / "indexing" / "build_embeddings.py"
-
-                    self.log("  Starting index build...")
-
-                    process = subprocess.Popen(
-                        [str(python_exe), str(build_script)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        cwd=str(target)
+                self.log("Building Index...")
+                python_exe = target / ".venv" / "Scripts" / "python.exe"
+                build_script = target / "src" / "indexing" / "build_embeddings.py"
+                subprocess.run([str(python_exe), str(build_script)])
+            
+            # 6. Create Shortcut
+            if self.create_shortcut.get():
+                self.log("Creating Desktop Shortcut...")
+                try:
+                    desktop = Path(os.environ["USERPROFILE"]) / "Desktop"
+                    launcher_bat = target / "launcher.bat"
+                    self._create_windows_shortcut(
+                        str(launcher_bat),
+                        str(desktop / "UE5 Source Query.lnk"),
+                        working_dir=str(target)
                     )
+                    self.log("  ✓ Shortcut created")
+                except Exception as e:
+                    self.log(f"  ! Failed to create shortcut: {e}")
 
-                    # Stream output
-                    for line in process.stdout:
-                        line = line.rstrip()
-                        if line:
-                            self.log(f"    {line}")
-
-                    process.wait()
-
-                    if process.returncode == 0:
-                        self.log("  ✓ Vector index built successfully")
-                    else:
-                        self.log("  ! Index build failed, run tools\\rebuild-index.bat manually")
-            else:
-                self.update_progress(7, "Skipping vector index build")
-
-            # Step 9: Final verification
-            self.update_progress(8, "Verifying installation...")
-
-            verification_checks = [
-                (target / "ask.bat", "Query script"),
-                (target / "tools" / "health-check.bat", "Health check tool"),
-                (venv_path / "Scripts" / "python.exe", "Python interpreter"),
-                (target / "src" / "core" / "hybrid_query.py", "Core engine")
-            ]
-
-            all_verified = True
-            for check_file, description in verification_checks:
-                if check_file.exists():
-                    self.log(f"  ✓ {description}")
-                else:
-                    self.log(f"  ✗ {description} MISSING")
-                    all_verified = False
-
-            if not all_verified:
-                raise Exception("Installation verification failed - some files missing")
-
-            # Success!
-            self.log("")
-            self.log("="*60)
-            self.log("Installation Complete!")
-            self.log("="*60)
-            self.log("")
-            self.log("Next steps:")
-            self.log(f"  1. cd \"{target}\"")
-
-            if not self.copy_config.get() or not (target / "config" / ".env").exists():
-                self.log("  2. configure.bat  (set up API key and UE5 paths)")
-            elif not (target / "src" / "indexing" / "EngineDirs.txt").exists():
-                self.log("  2. tools\\fix-paths.bat  (configure UE5 paths for this machine)")
-            else:
-                self.log("  2. Configuration already set up ✓")
-
-            self.log("  3. tools\\health-check.bat  (verify installation)")
-
-            if not self.build_index.get() or not (target / "data" / "vector_store.npz").exists():
-                self.log("  4. tools\\rebuild-index.bat  (build vector index)")
-                self.log("  5. ask.bat \"What is FVector\"  (test query)")
-            else:
-                self.log("  4. ask.bat \"What is FVector\"  (test query)")
-
-            self.log("")
-            self.log("Installation directory: " + str(target))
-
-            # Show success dialog
-            self.root.after(0, lambda: messagebox.showinfo(
-                "Installation Complete",
-                f"UE5 Source Query Tool successfully {'updated' if is_update else 'installed'} at:\n{target}\n\n"
-                f"See log for next steps."
-            ))
-
+            self.log("SUCCESS! Installation Complete.")
+            messagebox.showinfo("Success", "Installation Complete!")
+            
         except Exception as e:
-            self.log("")
-            self.log(f"ERROR: Installation failed: {e}")
-            self.log("")
-            import traceback
-            self.log(traceback.format_exc())
-
-            self.root.after(0, lambda: messagebox.showerror(
-                "Installation Failed",
-                f"An error occurred during installation:\n\n{str(e)}\n\n"
-                f"See log for details."
-            ))
-
+            self.log(f"ERROR: {e}")
+            messagebox.showerror("Error", str(e))
         finally:
-            self.root.after(0, lambda: self.install_btn.config(state=tk.NORMAL, text="▶ Install Now"))
-            self.root.after(0, lambda: self.progress.config(value=0))
-            self.root.after(0, lambda: self.progress_label.config(text="0%"))
+            self.btn_install.config(state=tk.NORMAL)
 
+    def log(self, msg):
+        self.log_queue.put(msg)
 
-def main():
-    """Main entry point"""
+    def process_log_queue(self):
+        try:
+            while True:
+                msg = self.log_queue.get_nowait()
+                self.log_text.insert(tk.END, msg + "\n")
+                self.log_text.see(tk.END)
+        except queue.Empty:
+            pass
+        self.root.after(100, self.process_log_queue)
+
+if __name__ == "__main__":
     root = tk.Tk()
     app = DeploymentWizard(root)
     root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
