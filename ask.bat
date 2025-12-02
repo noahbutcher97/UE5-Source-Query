@@ -2,8 +2,25 @@
 setlocal EnableDelayedExpansion
 
 REM UE5 Source Query Tool - Main Entry Point
-REM Author: Your Name
 REM Personal development tool for querying UE5.3 engine source code
+REM
+REM Usage: ask.bat "your question" [OPTIONS]
+REM
+REM Options:
+REM   --top-k N              Number of results (default: 5)
+REM   --scope SCOPE          engine, project, or all (default: engine)
+REM   --format FORMAT        Output format: text, json, jsonl, xml, markdown, code (default: text)
+REM   --no-code              Exclude code from output (metadata only)
+REM   --max-lines N          Max lines per code snippet (default: 50)
+REM   --json                 Output raw JSON (deprecated, use --format json)
+REM   --port N               Server port (default: 8765)
+REM   --no-server            Force local execution
+REM
+REM Examples:
+REM   ask.bat "FHitResult members"
+REM   ask.bat "FHitResult" --format json
+REM   ask.bat "collision detection" --format markdown --no-code
+REM   ask.bat "struct FVector" --format code --max-lines 20
 
 set "TOOL_ROOT=%~dp0"
 

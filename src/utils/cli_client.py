@@ -38,10 +38,23 @@ def main():
     parser.add_argument("question", nargs="+", help="Query text")
     parser.add_argument("--top-k", type=int, default=5, help="Results to return")
     parser.add_argument("--scope", default="engine", choices=["engine", "project", "all"])
-    parser.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # Output format options (NEW)
+    parser.add_argument("--format", default="text",
+                       choices=["text", "json", "jsonl", "xml", "markdown", "code"],
+                       help="Output format: text (default), json, jsonl, xml, markdown, code")
+    parser.add_argument("--no-code", action="store_true",
+                       help="Exclude code from output (metadata only)")
+    parser.add_argument("--max-lines", type=int, default=50,
+                       help="Maximum lines per code snippet (default: 50)")
+
+    # Legacy option (deprecated but maintained for backwards compatibility)
+    parser.add_argument("--json", action="store_true", help="Output raw JSON (deprecated, use --format json)")
+
+    # Server options
     parser.add_argument("--port", type=int, default=8765, help="Server port")
     parser.add_argument("--no-server", action="store_true", help="Force local execution (ignore server)")
-    
+
     args = parser.parse_args()
     question = " ".join(args.question)
 
@@ -71,10 +84,30 @@ def main():
             sys.exit(1)
 
     # 3. Output
-    if args.json:
-        print(json.dumps(results, indent=2))
+    # Handle legacy --json flag
+    if args.json and args.format == "text":
+        args.format = "json"
+
+    # Use OutputFormatter for all non-text formats
+    if args.format != "text":
+        from core.output_formatter import OutputFormatter, OutputFormat
+
+        try:
+            format_enum = OutputFormat[args.format.upper()]
+            formatted = OutputFormatter.format(
+                results,
+                format_type=format_enum,
+                include_code=not args.no_code,
+                max_snippet_lines=args.max_lines
+            )
+            print(formatted)
+        except Exception as e:
+            print(f"[ERROR] Formatting failed: {e}", file=sys.stderr)
+            # Fallback to raw JSON on error
+            print(json.dumps(results, indent=2))
     else:
-        print_results(results, show_reasoning=False) # Reasoning already printed if local
+        # Default text output (human-readable)
+        print_results(results, show_reasoning=False)  # Reasoning already printed if local
 
 if __name__ == "__main__":
     main()

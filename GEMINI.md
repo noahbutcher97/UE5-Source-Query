@@ -21,16 +21,23 @@
 
 ### User & Usage
 *   **`ask.bat "query"`**: The main entry point for querying the system.
-    *   `ask.bat --build-index`: Triggers the index build process.
-    *   `ask.bat "FHitResult" --copy`: Copies results to clipboard.
-*   **`install.bat`**: Launches the GUI installer for easy deployment.
-*   **`configure.bat`**: Runs the configuration wizard (API keys, UE5 paths).
-*   **`manage.bat`**: Opens the GUI management dashboard.
+    *   `ask.bat "FHitResult members"` - Human-readable text output
+    *   `ask.bat "FHitResult" --format json` - Structured JSON output
+    *   `ask.bat "collision" --format markdown --no-code` - Markdown without code
+    *   `ask.bat "struct FVector" --format code` - Code-only output
+*   **`launcher.bat`**: Opens the UnifiedDashboard GUI (5 tabs: Query, Config, Sources, Diagnostics, Maintenance)
+
+### AI Agent Workflows (NEW in v2.0.0)
+*   **Structured Output**: `ask.bat "query" --format json|jsonl|xml|markdown|code`
+*   **Metadata-Only**: `ask.bat "query" --format json --no-code` (fast, no large code blocks)
+*   **Code Context**: `ask.bat "query" --format code --max-lines 20` (for LLM prompts)
+*   **Scope Control**: `--scope engine|project|all` (default: engine)
 
 ### Maintenance & Dev
 *   **`rebuild-index.bat`**: Rebuilds the vector store from source.
-*   **`health-check.bat`**: comprehensive system diagnostics.
-*   **`fix-paths.bat`**: Regenerates `EngineDirs.txt` based on the current machine's UE5 installation.
+*   **Server Mode**: `python src/server/retrieval_server.py` (persistent model caching)
+
+See [docs/AI_AGENT_GUIDE.md](docs/AI_AGENT_GUIDE.md) for complete AI agent integration guide.
 
 ## Project Architecture
 
