@@ -20,7 +20,7 @@ from src.utils.config_manager import ConfigManager
 from src.utils.source_manager import SourceManager
 from src.utils.engine_helper import get_available_engines, resolve_uproject_source
 from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
-from src.core.hybrid_query import hybrid_query
+from src.core.hybrid_query import HybridQueryEngine
 
 class UnifiedDashboard:
     def __init__(self, root):
@@ -43,6 +43,11 @@ class UnifiedDashboard:
         self.api_model_var = tk.StringVar(value=self.config_manager.get('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'))
         self.embed_batch_size_var = tk.StringVar(value=self.config_manager.get('EMBED_BATCH_SIZE', '16'))
         self.query_scope_var = tk.StringVar(value="engine")
+        
+        self.engine = None
+
+        self.current_process = None
+        self.cancelled = False
 
         self.create_layout()
         
@@ -172,11 +177,17 @@ class UnifiedDashboard:
         
         def _run():
             try:
+                # Initialize engine if needed (Lazy Load)
+                if self.engine is None:
+                    self.log_query_result("Loading search engine (first run only)...", clear=True)
+                    self.config_manager.load()
+                    self.engine = HybridQueryEngine(self.script_dir, self.config_manager)
+
                 # Get configured embedding model
                 embed_model = self.embed_model_var.get()
 
                 # Run hybrid query with explicit model
-                results = hybrid_query(
+                results = self.engine.query(
                     question=query,
                     top_k=5,
                     scope=scope,
@@ -716,8 +727,14 @@ class UnifiedDashboard:
         action_frame = ttk.LabelFrame(frame, text=" Maintenance Actions ", padding=15)
         action_frame.pack(fill=tk.X, pady=(0, 20))
 
-        ttk.Button(action_frame, text="Rebuild Index", command=self.rebuild_index, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(action_frame, text="Update Tool (Git Pull)", command=self.update_tool).pack(side=tk.LEFT)
+        self.btn_rebuild = ttk.Button(action_frame, text="Rebuild Index", command=self.rebuild_index, style="Accent.TButton")
+        self.btn_rebuild.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.btn_update = ttk.Button(action_frame, text="Update Tool (Git Pull)", command=self.update_tool)
+        self.btn_update.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.btn_cancel = ttk.Button(action_frame, text="Close", command=self.cancel_or_close)
+        self.btn_cancel.pack(side=tk.LEFT)
 
         # Log Section
         log_frame = ttk.LabelFrame(frame, text=" Operation Log ", padding=15)
@@ -728,6 +745,22 @@ class UnifiedDashboard:
         
         # Initial check
         self.check_status()
+
+    def cancel_or_close(self):
+        if self.current_process:
+            if messagebox.askyesno("Cancel", "Cancel current operation?"):
+                self.cancelled = True
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+                self.log_maint("[CANCELLED] Operation cancelled.")
+                self.current_process = None
+                self.btn_rebuild.config(state=tk.NORMAL)
+                self.btn_update.config(state=tk.NORMAL)
+                self.btn_cancel.config(text="Close")
+        else:
+            self.root.destroy()
 
     def check_status(self):
         # Simple check for vector store file
@@ -746,24 +779,46 @@ class UnifiedDashboard:
             return
         
         self.log_maint("Starting index rebuild...", clear=True)
+        self.btn_rebuild.config(state=tk.DISABLED)
+        self.btn_update.config(state=tk.DISABLED)
+        self.btn_cancel.config(text="Cancel")
+        self.cancelled = False
         
         def _run():
             try:
                 script = self.script_dir / "tools" / "rebuild-index.bat"
-                process = subprocess.Popen(
+                self.current_process = subprocess.Popen(
                     [str(script), "--verbose", "--force"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    bufsize=1,
+                    universal_newlines=True,
                     cwd=str(self.script_dir)
                 )
-                for line in process.stdout:
-                    self.root.after(0, lambda l=line: self.log_maint(l.rstrip(), append=True))
                 
-                process.wait()
-                self.root.after(0, self.check_status)
+                if self.current_process.stdout:
+                    for line in iter(self.current_process.stdout.readline, ''):
+                        if self.cancelled: break
+                        if line:
+                            self.root.after(0, lambda l=line: self.log_maint(l.strip(), append=True))
+                
+                if not self.cancelled:
+                    self.current_process.wait()
+                    if self.current_process.returncode == 0:
+                        self.root.after(0, lambda: self.log_maint("[SUCCESS] Index rebuild complete.", append=True))
+                        self.root.after(0, self.check_status)
+                    else:
+                        self.root.after(0, lambda: self.log_maint(f"[ERROR] Failed with code {self.current_process.returncode}", append=True))
+
             except Exception as e:
-                 self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+                 if not self.cancelled:
+                    self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+            finally:
+                self.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
+                self.root.after(0, lambda: self.btn_update.config(state=tk.NORMAL))
+                self.root.after(0, lambda: self.btn_cancel.config(text="Close"))
+                self.current_process = None
 
         threading.Thread(target=_run, daemon=True).start()
 

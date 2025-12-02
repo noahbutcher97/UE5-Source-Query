@@ -36,8 +36,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Run the hybrid query engine with all passed arguments using venv python directly
-"%TOOL_ROOT%.venv\Scripts\python.exe" "%TOOL_ROOT%src\core\hybrid_query.py" %*
+REM Run the CLI client (Tries server first, then falls back to local)
+"%TOOL_ROOT%.venv\Scripts\python.exe" "%TOOL_ROOT%src\utils\cli_client.py" %*
 
 REM Exit with script result
 exit /b %errorlevel%

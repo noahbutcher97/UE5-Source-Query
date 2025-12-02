@@ -5,6 +5,11 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from indexing.metadata_enricher import MetadataEnricher
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -741,6 +746,9 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     existing_embeddings, existing_meta = load_existing()
     cache = load_cache() if incremental and not force else {}
 
+    # Initialize enricher for single-pass indexing
+    enricher = MetadataEnricher()
+
     # Initialize model with GPU support
     global GPU_DEVICE
     model = SentenceTransformer(MODEL_NAME)
@@ -788,6 +796,9 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             print(f"Error: Failed to use GPU: {e}")
             raise
 
+    print(f"Model Device: {model.device}")
+    print(f"Embedding Batch Size: {EMBED_BATCH}")
+
     new_texts, new_meta = [], []
     reused_embeddings, reused_meta = [], []
 
@@ -814,12 +825,17 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             continue
         for idx, chunk in enumerate(chunks):
             new_texts.append(chunk)
+            
+            # Single-pass enrichment
+            enrichment = enricher.get_enrichment_data(chunk, str(file))
+            
             new_meta.append({
                 "path": str(file),
                 "origin": origin,
                 "chunk_index": idx,
                 "total_chunks": len(chunks),
-                "chars": len(chunk)
+                "chars": len(chunk),
+                **enrichment
             })
         cache[file_hash] = {"path": str(file), "count": len(chunks)}
 

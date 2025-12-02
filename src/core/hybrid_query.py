@@ -1,16 +1,10 @@
-# python
-# ===== File: HybridQuery.py =====
-"""
-Hybrid query engine that combines definition extraction and semantic search.
-Automatically routes queries to the best search strategy.
-"""
 import sys
 import os
 import json
 import time
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Add parent to path for imports
 TOOL_ROOT = Path(__file__).parent.parent.parent
@@ -20,276 +14,282 @@ from core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
 from core.definition_extractor import DefinitionExtractor, DefinitionResult
 from core.filtered_search import FilteredSearch
 from core import query_engine
+from utils.config_manager import ConfigManager # For getting model name
 
-
-def hybrid_query(
-    question: str,
-    top_k: int = 5,
-    dry_run: bool = False,
-    show_reasoning: bool = False,
-    json_out: bool = False,
-    scope: str = "engine",
-    embed_model_name: str = None,
-    **kwargs
-) -> Dict[str, Any]:
+class HybridQueryEngine:
     """
-    Perform hybrid query using both definition extraction and semantic search.
-
-    Args:
-        question: User query
-        top_k: Number of results to return
-        dry_run: Skip API call
-        show_reasoning: Show query analysis reasoning
-        json_out: Output as JSON
-        scope: Search scope ('engine', 'project', 'all')
-        embed_model_name: Override embedding model name
-        **kwargs: Additional args passed to semantic search
-
-    Returns:
-        Dictionary with results and metadata
+    Hybrid query engine that combines definition extraction and semantic search.
+    Automatically routes queries to the best search strategy.
+    Keeps resources loaded in memory for faster subsequent queries.
     """
-    timing = {}
-    t_start = time.perf_counter()
+    def __init__(self, tool_root: Path, config_manager: Optional[ConfigManager] = None):
+        self.tool_root = tool_root
+        self.config_manager = config_manager or ConfigManager(tool_root)
 
-    # Analyze query intent
-    t0 = time.perf_counter()
-    analyzer = QueryIntentAnalyzer()
-    intent = analyzer.analyze(question)
-    timing['intent_analysis_s'] = time.perf_counter() - t0
-
-    if show_reasoning:
-        print(f"\n=== Query Analysis ===")
-        print(f"Type: {intent.query_type.value}")
-        if intent.entity_name:
-            print(f"Entity: {intent.entity_type.value} {intent.entity_name}")
-        print(f"Confidence: {intent.confidence:.2f}")
-        print(f"Reasoning: {intent.reasoning}")
-        print(f"Scope: {scope}")
-        if intent.enhanced_query != question:
-            print(f"Enhanced query: {intent.enhanced_query}")
-        print()
-
-    results = {
-        'question': question,
-        'intent': {
-            'type': intent.query_type.value,
-            'entity_type': intent.entity_type.value if intent.entity_type else None,
-            'entity_name': intent.entity_name,
-            'confidence': intent.confidence,
-            'reasoning': intent.reasoning,
-            'enhanced_query': intent.enhanced_query,
-            'scope': scope
-        },
-        'definition_results': [],
-        'semantic_results': [],
-        'combined_results': [],
-        'timing': timing
-    }
-
-    # Route based on intent
-    if intent.query_type == QueryType.DEFINITION:
-        # Pure definition extraction
-        # TODO: DefinitionExtractor needs scope support too? 
-        # For now, regex extraction is fast enough to just run on everything or we filter later.
-        # But DefinitionExtractor takes file_paths in init.
-        # We should ideally filter those file paths. 
-        t1 = time.perf_counter()
-        def_results = _extract_definitions(intent, scope)
-        timing['definition_extraction_s'] = time.perf_counter() - t1
-
-        results['definition_results'] = [_format_def_result(r) for r in def_results]
-        results['combined_results'] = results['definition_results']
-
-    elif intent.query_type == QueryType.HYBRID:
-        # Try definition extraction first, supplement with semantic search
-        t1 = time.perf_counter()
-        def_results = _extract_definitions(intent, scope)
-        timing['definition_extraction_s'] = time.perf_counter() - t1
-
-        t2 = time.perf_counter()
-        # Use enhanced query for better semantic results
-        sem_results = _semantic_search(
-            intent.enhanced_query,
-            top_k=top_k,
-            timing=timing,
-            intent=intent,
-            scope=scope,
-            embed_model_name=embed_model_name,
-            **kwargs
-        )
-        timing['semantic_search_s'] = time.perf_counter() - t2
-
-        results['definition_results'] = [_format_def_result(r) for r in def_results]
-        results['semantic_results'] = sem_results
-
-        # Combine results: definitions first, then semantic
-        combined = results['definition_results'][:top_k]
-        if len(combined) < top_k:
-            # Add semantic results to fill up to top_k
-            remaining = top_k - len(combined)
-            combined.extend(sem_results[:remaining])
-        results['combined_results'] = combined
-
-    else:  # SEMANTIC
-        # Pure semantic search
-        t1 = time.perf_counter()
-        sem_results = _semantic_search(
-            intent.enhanced_query,
-            top_k=top_k,
-            timing=timing,
-            intent=intent,
-            scope=scope,
-            embed_model_name=embed_model_name,
-            **kwargs
-        )
-        timing['semantic_search_s'] = time.perf_counter() - t1
-
-        results['semantic_results'] = sem_results
-        results['combined_results'] = sem_results
-
-    timing['total_s'] = time.perf_counter() - t_start
-    results['timing'] = timing
-
-    return results
-
-
-def _extract_definitions(intent, scope: str = "engine") -> List[DefinitionResult]:
-    """Extract definitions based on intent"""
-    if not intent.entity_name or not intent.entity_type:
-        return []
-
-    # Load file list from metadata
-    meta_path = TOOL_ROOT / "data" / "vector_meta.json"
-    if not meta_path.exists():
-        return []
-
-    meta = json.loads(meta_path.read_text())
-    
-    # Filter files by scope
-    valid_paths = []
-    for item in meta['items']:
-        origin = item.get('origin', 'engine')
-        if scope == 'all' or origin == scope:
-            valid_paths.append(Path(item['path']))
-            
-    if not valid_paths:
-        return []
+        # Load embeddings and metadata once
+        self.embeddings, self.meta = query_engine.load_store()
         
-    # Deduplicate
-    file_paths = list(set(valid_paths))
+        # Load model once
+        self.embed_model_name = self.config_manager.get('EMBED_MODEL', query_engine.DEFAULT_EMBED_MODEL)
+        self.model = query_engine.get_model(self.embed_model_name)
 
-    extractor = DefinitionExtractor(file_paths)
+        self.analyzer = QueryIntentAnalyzer()
 
-    # Route to appropriate extractor with fuzzy matching enabled
-    # This allows queries like "HitResult" to match "FHitResult"
-    if intent.entity_type == EntityType.STRUCT:
-        return extractor.extract_struct(intent.entity_name, fuzzy=True)
-    elif intent.entity_type == EntityType.CLASS:
-        return extractor.extract_class(intent.entity_name, fuzzy=True)
-    elif intent.entity_type == EntityType.ENUM:
-        return extractor.extract_enum(intent.entity_name, fuzzy=True)
-    elif intent.entity_type == EntityType.FUNCTION:
-        return extractor.extract_function(intent.entity_name, fuzzy=True)
+        # Initialize DefinitionExtractor with all indexed files
+        # It will filter by scope internally during query
+        definition_file_paths = list(set(Path(item['path']) for item in self.meta))
+        self.definition_extractor = DefinitionExtractor(definition_file_paths)
 
-    return []
+        # Initialize FilteredSearch once
+        self.filtered_search = FilteredSearch(self.embeddings, self.meta)
 
+    def query(
+        self,
+        question: str,
+        top_k: int = 5,
+        dry_run: bool = False,
+        show_reasoning: bool = False,
+        scope: str = "engine",
+        embed_model_name: Optional[str] = None, # Allow overriding global model for a specific query
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Perform hybrid query using both definition extraction and semantic search.
 
-def _semantic_search(query: str, top_k: int, timing: dict, intent=None, scope: str = "engine", embed_model_name: str = None, **kwargs) -> List[Dict[str, Any]]:
-    """
-    Perform semantic search with optional filtered search and entity boosting.
-    """
-    # Load embeddings and metadata
-    embeddings, meta = query_engine.load_store()
+        Args:
+            question: User query
+            top_k: Number of results to return
+            dry_run: Skip API call
+            show_reasoning: Show query analysis reasoning
+            json_out: Output as JSON (handled by main or caller)
+            scope: Search scope ('engine', 'project', 'all')
+            embed_model_name: Override embedding model name for this query
+            **kwargs: Additional args passed to semantic search
 
-    # Check for enriched metadata
-    enriched_meta_path = TOOL_ROOT / "data" / "vector_meta_enriched.json"
-    has_enriched = enriched_meta_path.exists()
+        Returns:
+            Dictionary with results and metadata
+        """
+        timing = {}
+        t_start = time.perf_counter()
 
-    if has_enriched:
-        enriched_meta = json.loads(enriched_meta_path.read_text())['items']
+        # Analyze query intent
+        t0 = time.perf_counter()
+        intent = self.analyzer.analyze(question)
+        timing['intent_analysis_s'] = time.perf_counter() - t0
+
+        if show_reasoning:
+            print(f"\n=== Query Analysis ===")
+            print(f"Type: {intent.query_type.value}")
+            if intent.entity_name:
+                print(f"Entity: {intent.entity_type.value} {intent.entity_name}")
+            print(f"Confidence: {intent.confidence:.2f}")
+            print(f"Reasoning: {intent.reasoning}")
+            print(f"Scope: {scope}")
+            if intent.enhanced_query != question:
+                print(f"Enhanced query: {intent.enhanced_query}")
+            print()
+
+        results = {
+            'question': question,
+            'intent': {
+                'type': intent.query_type.value,
+                'entity_type': intent.entity_type.value if intent.entity_type else None,
+                'entity_name': intent.entity_name,
+                'confidence': intent.confidence,
+                'reasoning': intent.reasoning,
+                'enhanced_query': intent.enhanced_query,
+                'scope': scope
+            },
+            'definition_results': [],
+            'semantic_results': [],
+            'combined_results': [],
+            'timing': timing
+        }
+
+        # Route based on intent
+        if intent.query_type == QueryType.DEFINITION:
+            t1 = time.perf_counter()
+            def_results = self._extract_definitions(intent, scope)
+            timing['definition_extraction_s'] = time.perf_counter() - t1
+
+            results['definition_results'] = [self._format_def_result(r) for r in def_results]
+            results['combined_results'] = results['definition_results']
+
+        elif intent.query_type == QueryType.HYBRID:
+            t1 = time.perf_counter()
+            def_results = self._extract_definitions(intent, scope)
+            timing['definition_extraction_s'] = time.perf_counter() - t1
+
+            t2 = time.perf_counter()
+            sem_results = self._semantic_search(
+                intent.enhanced_query,
+                top_k=top_k,
+                timing=timing,
+                intent=intent,
+                scope=scope,
+                embed_model_name=embed_model_name,
+                **kwargs
+            )
+            timing['semantic_search_s'] = time.perf_counter() - t2
+
+            results['definition_results'] = [self._format_def_result(r) for r in def_results]
+            results['semantic_results'] = sem_results
+
+            # Combine results: definitions first, then semantic (deduplicate if needed)
+            combined_deduped = []
+            def_paths = {Path(r['file_path']).resolve() for r in results['definition_results']}
+
+            for r in results['definition_results']:
+                combined_deduped.append(r)
+            
+            for r in sem_results:
+                sem_path = Path(r['path']).resolve()
+                # Only add semantic result if its path is not already covered by a definition result
+                if sem_path not in def_paths:
+                    combined_deduped.append(r)
+            
+            results['combined_results'] = combined_deduped[:top_k]
+
+        else:  # SEMANTIC
+            t1 = time.perf_counter()
+            sem_results = self._semantic_search(
+                intent.enhanced_query,
+                top_k=top_k,
+                timing=timing,
+                intent=intent,
+                scope=scope,
+                embed_model_name=embed_model_name,
+                **kwargs
+            )
+            timing['semantic_search_s'] = time.perf_counter() - t1
+
+            results['semantic_results'] = sem_results
+            results['combined_results'] = results['semantic_results']
+
+        timing['total_s'] = time.perf_counter() - t_start
+        results['timing'] = timing
+
+        return results
+
+    def _extract_definitions(self, intent, scope: str = "engine") -> List[DefinitionResult]:
+        """Extract definitions based on intent"""
+        if not intent.entity_name or not intent.entity_type:
+            return []
+
+        # Filter files by scope for definition extraction
+        scoped_meta = [item for item in self.meta if scope == 'all' or item.get('origin', 'engine') == scope]
+        definition_file_paths = list(set(Path(item['path']) for item in scoped_meta))
+        
+        # Reinitialize DefinitionExtractor for each query to ensure fresh file list for current scope
+        # This is needed because the self.definition_extractor was initialized with ALL files
+        scoped_extractor = DefinitionExtractor(definition_file_paths)
+
+        # Route to appropriate extractor with fuzzy matching enabled
+        if intent.entity_type == EntityType.STRUCT:
+            return scoped_extractor.extract_struct(intent.entity_name, fuzzy=True)
+        elif intent.entity_type == EntityType.CLASS:
+            return scoped_extractor.extract_class(intent.entity_name, fuzzy=True)
+        elif intent.entity_type == EntityType.ENUM:
+            return scoped_extractor.extract_enum(intent.entity_name, fuzzy=True)
+        elif intent.entity_type == EntityType.FUNCTION:
+            return scoped_extractor.extract_function(intent.entity_name, fuzzy=True)
+
+        return []
+
+    def _semantic_search(self, query: str, top_k: int, timing: dict, intent=None, scope: str = "engine", embed_model_name: str = None, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Perform semantic search with optional filtered search and entity boosting.
+        """
+        # Metadata is now always enriched in self.meta
+        enriched_meta = self.meta
         timing['using_filtered_search'] = True
-    else:
-        enriched_meta = meta
-        timing['using_filtered_search'] = False
 
-    # Encode query
-    t0 = time.perf_counter()
-    model_name = embed_model_name or kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL)
-    model = query_engine.get_model(model_name)
-    qvec = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
-    timing['embed_s'] = time.perf_counter() - t0
+        # Encode query
+        t0 = time.perf_counter()
+        current_embed_model_name = embed_model_name or self.embed_model_name
+        # Check if the query needs a different model, if so, load it temporarily
+        if current_embed_model_name != self.embed_model_name:
+            current_model = query_engine.get_model(current_embed_model_name)
+        else:
+            current_model = self.model # Use the pre-loaded model
 
-    # Validate dimensions match
-    if qvec.shape[0] != embeddings.shape[1]:
-        raise ValueError(
-            f"Dimension mismatch: Query vector has {qvec.shape[0]} dimensions (model: {model_name}), "
-            f"but vector store has {embeddings.shape[1]} dimensions. "
-            f"Please rebuild the index with the correct model, or change the embedding model in Configuration."
-        )
+        qvec = current_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+        timing['embed_s'] = time.perf_counter() - t0
 
-    # Perform search
-    t1 = time.perf_counter()
+        # Validate dimensions match
+        if qvec.shape[0] != self.embeddings.shape[1]:
+            raise ValueError(
+                f"Dimension mismatch: Query vector has {qvec.shape[0]} dimensions (model: {current_embed_model_name}), "
+                f"but vector store has {self.embeddings.shape[1]} dimensions. "
+                f"Please rebuild the index with the correct model, or change the embedding model in Configuration."
+            )
 
-    # Determine origin filter
-    origin_filter = None
-    if scope == 'engine': origin_filter = 'engine'
-    elif scope == 'project': origin_filter = 'project'
+        # Perform search
+        t1 = time.perf_counter()
 
-    # Use FilteredSearch if we have enriched meta OR if we need to filter by origin/scope
-    should_use_filtered = has_enriched or (origin_filter is not None) or (intent and intent.entity_name)
+        # Determine origin filter
+        origin_filter = None
+        if scope == 'engine': origin_filter = 'engine'
+        elif scope == 'project': origin_filter = 'project'
 
-    if should_use_filtered:
-        # Use FilteredSearch with entity boosting
-        search = FilteredSearch(embeddings, enriched_meta)
+        # should_use_filtered is always True now because self.meta is always enriched.
+        # This simplifies the logic and always uses FilteredSearch.
+        should_use_filtered = True 
 
-        # Extract entity names for boosting
-        boost_entities = [intent.entity_name] if intent and intent.entity_name else []
+        if should_use_filtered:
+            # Use FilteredSearch with entity boosting
+            # Reuse the pre-initialized filtered_search
+            search = self.filtered_search 
 
-        results = search.search(
-            qvec,
-            top_k=top_k,
-            boost_entities=boost_entities,
-            boost_macros=True,  # Boost UE5 macro chunks
-            query_type=intent.query_type.value if intent else None,
-            origin=origin_filter  # Pass scope filter
-        )
+            # Extract entity names for boosting
+            boost_entities = [intent.entity_name] if intent and intent.entity_name else []
 
-        # Convert FilteredSearch results to query_engine format
-        hits = []
-        for r in results:
-            hits.append({
-                'path': r['path'],
-                'chunk_index': r['chunk_index'],
-                'total_chunks': r['total_chunks'],
-                'score': r['score'],
-                'boosted': True
-            })
-    else:
-        # Fall back to standard semantic search
-        hits = query_engine.select(qvec, embeddings, meta, top_k)
-        for hit in hits:
-            hit['boosted'] = False
+            results = search.search(
+                qvec,
+                top_k=top_k,
+                boost_entities=boost_entities,
+                boost_macros=True,  # Boost UE5 macro chunks
+                query_type=intent.query_type.value if intent else None,
+                origin=origin_filter  # Pass scope filter
+            )
 
-    timing['select_s'] = time.perf_counter() - t1
+            # Convert FilteredSearch results to query_engine format
+            hits = []
+            for r in results:
+                hits.append({
+                    'path': r['path'],
+                    'chunk_index': r['chunk_index'],
+                    'total_chunks': r['total_chunks'],
+                    'score': r['score'],
+                    'boosted': True,
+                    'origin': r.get('origin', 'engine') # Ensure origin is passed
+                })
+        else:
+            # This path should ideally not be taken anymore as self.meta is always enriched
+            # It's kept as a theoretical fallback, but FilteredSearch is always preferred.
+            hits = query_engine.select(qvec, self.embeddings, self.meta, top_k)
+            for hit in hits:
+                hit['boosted'] = False
 
-    return hits
+        timing['select_s'] = time.perf_counter() - t1
 
+        return hits
 
-def _format_def_result(result: DefinitionResult) -> Dict[str, Any]:
-    """Format definition result for output"""
-    return {
-        'type': 'definition',
-        'file_path': result.file_path,
-        'line_start': result.line_start,
-        'line_end': result.line_end,
-        'entity_type': result.entity_type,
-        'entity_name': result.entity_name,
-        'definition': result.definition[:500],  # Truncate for display
-        'members': result.members[:10],  # First 10 members
-        'total_members': len(result.members),
-        'match_quality': result.match_quality
-    }
-
+    def _format_def_result(self, result: DefinitionResult) -> Dict[str, Any]:
+        """Format definition result for output"""
+        return {
+            'type': 'definition',
+            'file_path': result.file_path,
+            'line_start': result.line_start,
+            'line_end': result.line_end,
+            'entity_type': result.entity_type,
+            'entity_name': result.entity_name,
+            'definition': result.definition[:500],  # Truncate for display
+            'members': result.members[:10],  # First 10 members
+            'total_members': len(result.members),
+            'match_quality': result.match_quality,
+            'origin': result.origin if hasattr(result, 'origin') else 'engine' # Add origin
+        }
 
 def print_results(results: Dict[str, Any], show_reasoning: bool = False):
     """Print results in human-readable format"""
@@ -311,15 +311,16 @@ def print_results(results: Dict[str, Any], show_reasoning: bool = False):
             print(f"\n[{i}] {res['entity_type'].upper()} {res['entity_name']}")
             print(f"    File: {res['file_path']}")
             print(f"    Lines: {res['line_start']}-{res['line_end']}")
-            print(f"    Members: {res['total_members']}")
-            if res['members']:
-                print(f"    First members: {', '.join(res['members'][:5])}")
+            print(f"    Members: {', '.join(res['members'][:5])}{'...' if len(res['members']) > 5 else ''}")
+            print(f"    Origin: {res['origin']}") # Display origin
 
     if results['semantic_results']:
         print(f"\n=== Semantic Results ({len(results['semantic_results'])}) ===")
         for i, res in enumerate(results['semantic_results'], 1):
             path = Path(res['path']).name
             print(f"[{i}] score={res['score']:.3f} | {path} | chunk {res['chunk_index']+1}/{res['total_chunks']}")
+            print(f"    Origin: {res['origin']}") # Display origin
+
 
     print(f"\n=== Timing ===")
     for key, val in results['timing'].items():
@@ -344,17 +345,20 @@ def main():
     args = parser.parse_args()
     question = " ".join(args.question)
 
+    # Instantiate the engine
+    engine = HybridQueryEngine(TOOL_ROOT)
+
     # Perform hybrid query
-    results = hybrid_query(
+    results = engine.query(
         question=question,
         top_k=args.top_k,
         dry_run=args.dry_run,
         show_reasoning=args.show_reasoning,
-        json_out=args.json,
-        pattern=args.pattern,
-        extensions=args.extensions,
         scope=args.scope,
-        embed_model_name=args.model
+        embed_model_name=args.model,
+        # Pass other args if needed by semantic search, etc.
+        pattern=args.pattern,
+        extensions=args.extensions
     )
 
     # Output results

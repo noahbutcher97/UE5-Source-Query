@@ -51,9 +51,8 @@ class MetadataEnricher:
     USTRUCT_PATTERN = re.compile(r'\bUSTRUCT\s*\(')
     UENUM_PATTERN = re.compile(r'\bUENUM\s*\(')
 
-    def enrich_chunk(self, chunk_text: str, existing_meta: Dict) -> ChunkMetadata:
-        """Enrich a single chunk with entity metadata"""
-
+    def get_enrichment_data(self, chunk_text: str, file_path: str) -> Dict:
+        """Get enrichment data for a text chunk"""
         # Extract entities
         entities = set()
         entity_types = []
@@ -61,7 +60,7 @@ class MetadataEnricher:
         # Find structs
         for match in self.STRUCT_PATTERN.finditer(chunk_text):
             name = match.group(1)
-            if name not in ['if', 'for', 'while']:  # Avoid false positives
+            if name not in ['if', 'for', 'while', 'switch', 'return']:
                 entities.add(name)
                 entity_types.append('struct')
 
@@ -77,18 +76,26 @@ class MetadataEnricher:
             entities.add(name)
             entity_types.append('enum')
 
-        # Detect UE5 macros
-        has_uproperty = bool(self.UPROPERTY_PATTERN.search(chunk_text))
-        has_ufunction = bool(self.UFUNCTION_PATTERN.search(chunk_text))
-        has_uclass = bool(self.UCLASS_PATTERN.search(chunk_text))
-        has_ustruct = bool(self.USTRUCT_PATTERN.search(chunk_text))
-        has_uenum = bool(self.UENUM_PATTERN.search(chunk_text))
-
         # File type detection
-        path = existing_meta['path']
-        is_header = path.endswith('.h') or path.endswith('.hpp')
-        is_implementation = path.endswith('.cpp') or path.endswith('.c')
+        is_header = file_path.lower().endswith(('.h', '.hpp'))
+        is_implementation = file_path.lower().endswith(('.cpp', '.c', '.cc', '.m', '.mm'))
 
+        return {
+            'entities': sorted(entities),
+            'entity_types': sorted(set(entity_types)),
+            'has_uproperty': bool(self.UPROPERTY_PATTERN.search(chunk_text)),
+            'has_ufunction': bool(self.UFUNCTION_PATTERN.search(chunk_text)),
+            'has_uclass': bool(self.UCLASS_PATTERN.search(chunk_text)),
+            'has_ustruct': bool(self.USTRUCT_PATTERN.search(chunk_text)),
+            'has_uenum': bool(self.UENUM_PATTERN.search(chunk_text)),
+            'is_header': is_header,
+            'is_implementation': is_implementation
+        }
+
+    def enrich_chunk(self, chunk_text: str, existing_meta: Dict) -> ChunkMetadata:
+        """Enrich a single chunk with entity metadata"""
+        data = self.get_enrichment_data(chunk_text, existing_meta['path'])
+        
         return ChunkMetadata(
             path=existing_meta['path'],
             chunk_index=existing_meta['chunk_index'],
@@ -97,15 +104,7 @@ class MetadataEnricher:
             chunk_overlap=existing_meta.get('chunk_overlap', 200),
             chars=existing_meta.get('chars', 0),
             sha256=existing_meta.get('sha256', ''),
-            entities=sorted(entities),
-            entity_types=sorted(set(entity_types)),
-            has_uproperty=has_uproperty,
-            has_ufunction=has_ufunction,
-            has_uclass=has_uclass,
-            has_ustruct=has_ustruct,
-            has_uenum=has_uenum,
-            is_header=is_header,
-            is_implementation=is_implementation
+            **data
         )
 
     def enrich_metadata_file(self, meta_path: Path, output_path: Path = None):

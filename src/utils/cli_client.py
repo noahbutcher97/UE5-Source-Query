@@ -1,0 +1,80 @@
+import sys
+import json
+import argparse
+import urllib.request
+import urllib.parse
+import urllib.error
+from pathlib import Path
+
+# Add parent to path to import core if needed for fallback
+TOOL_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(TOOL_ROOT / "src"))
+
+from core.hybrid_query import HybridQueryEngine, print_results
+
+def query_server(question: str, top_k: int, scope: str, port: int = 8765) -> dict | None:
+    """Try to query the running server. Returns None if server is down."""
+    params = {
+        "q": question,
+        "top_k": str(top_k),
+        "scope": scope
+    }
+    url = f"http://127.0.0.1:{port}/search?{urllib.parse.urlencode(params)}"
+    
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            if response.status == 200:
+                return json.loads(response.read().decode('utf-8'))
+    except (urllib.error.URLError, ConnectionRefusedError):
+        return None
+    except Exception as e:
+        # Server exists but returned error
+        print(f"[WARN] Server query failed: {e}")
+        return None
+    return None
+
+def main():
+    parser = argparse.ArgumentParser(description="CLI Client for UE5 Source Query")
+    parser.add_argument("question", nargs="+", help="Query text")
+    parser.add_argument("--top-k", type=int, default=5, help="Results to return")
+    parser.add_argument("--scope", default="engine", choices=["engine", "project", "all"])
+    parser.add_argument("--json", action="store_true", help="Output raw JSON")
+    parser.add_argument("--port", type=int, default=8765, help="Server port")
+    parser.add_argument("--no-server", action="store_true", help="Force local execution (ignore server)")
+    
+    args = parser.parse_args()
+    question = " ".join(args.question)
+
+    # 1. Try Server
+    results = None
+    if not args.no_server:
+        results = query_server(question, args.top_k, args.scope, args.port)
+        if results and not args.json:
+            print(f"[INFO] Result from Search Server (Instant)")
+
+    # 2. Fallback to Local
+    if not results:
+        if not args.no_server and not args.json:
+            print("[INFO] Server unavailable. Starting local engine (Cold Start)...")
+        
+        # Initialize engine locally
+        try:
+            engine = HybridQueryEngine(TOOL_ROOT)
+            results = engine.query(
+                question=question,
+                top_k=args.top_k,
+                scope=args.scope,
+                show_reasoning=not args.json
+            )
+        except Exception as e:
+            print(f"[ERROR] Engine failed: {e}")
+            sys.exit(1)
+
+    # 3. Output
+    if args.json:
+        print(json.dumps(results, indent=2))
+    else:
+        print_results(results, show_reasoning=False) # Reasoning already printed if local
+
+if __name__ == "__main__":
+    main()
