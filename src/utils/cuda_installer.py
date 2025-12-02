@@ -146,8 +146,11 @@ def get_gpu_requirements_file_content(cuda_version: str) -> str:
     # Map CUDA version to compatible PyTorch CUDA version
     cuda_major_minor = '.'.join(cuda_version.split('.')[:2])
 
-    # PyTorch uses cu118, cu121, cu124 naming
-    if cuda_major_minor >= "12.4":
+    # PyTorch uses cu118, cu121, cu124, cu128 naming
+    # cu128 supports RTX 5090 (SM 12.0) natively for optimal performance
+    if cuda_major_minor >= "12.6":
+        torch_cuda = "cu128"
+    elif cuda_major_minor >= "12.4":
         torch_cuda = "cu124"
     elif cuda_major_minor >= "12.1":
         torch_cuda = "cu121"
@@ -166,9 +169,9 @@ def get_gpu_requirements_file_content(cuda_version: str) -> str:
 
     return f"""# GPU-accelerated packages for CUDA {cuda_version}
 # PyTorch with CUDA support (this enables GPU for embeddings)
-# NOTE: Using 2.6.0+ due to security vulnerability CVE-2025-32434
-torch==2.6.0+{torch_cuda}
-torchvision==0.21.0+{torch_cuda}
+# NOTE: Using 2.9.1+ for native RTX 5090 (SM 12.0) support and security fixes
+torch==2.9.1+{torch_cuda}
+torchvision==0.21.1+{torch_cuda}
 --extra-index-url https://download.pytorch.org/whl/{torch_cuda}
 
 # GPU-accelerated transformers (uses PyTorch GPU)
