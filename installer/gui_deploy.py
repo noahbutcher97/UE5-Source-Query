@@ -748,9 +748,13 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             # 2. Write Configuration
             self.log("Configuring...")
             env_path = target / "config" / ".env"
+
+            # Ensure vector store path is relative to target installation
+            vector_dir = self.vector_store_path.get() if self.vector_store_path.get() else str(target / "data")
+
             with open(env_path, 'w') as f:
                 f.write(f"ANTHROPIC_API_KEY={self.api_key.get()}\n")
-                f.write(f"VECTOR_OUTPUT_DIR={self.vector_store_path.get()}\n")
+                f.write(f"VECTOR_OUTPUT_DIR={vector_dir}\n")
                 f.write(f"UE_ENGINE_ROOT={self.engine_path.get()}\n")
                 f.write(f"EMBED_MODEL={self.embed_model.get()}\n")
                 f.write(f"ANTHROPIC_MODEL={self.api_model.get()}\n")
@@ -918,7 +922,15 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 cmd = [str(rebuild_script), "--force", "--verbose"]
 
                 self.log(f"Running: {rebuild_script.name} --force --verbose")
-                
+
+                # Ensure environment variables are passed to subprocess
+                import os
+                env = os.environ.copy()
+                # Force the correct paths for this installation
+                env['VECTOR_OUTPUT_DIR'] = str(target / "data")
+                env['UE_ENGINE_ROOT'] = self.engine_path.get()
+                env['EMBED_BATCH_SIZE'] = self.embed_batch_size.get()
+
                 self.current_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -926,7 +938,8 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     text=True,
                     bufsize=1,
                     universal_newlines=True,
-                    cwd=str(target)
+                    cwd=str(target),
+                    env=env  # Pass environment with correct paths
                 )
                 
                 # Read output line by line
