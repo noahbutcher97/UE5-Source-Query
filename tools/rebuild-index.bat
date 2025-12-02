@@ -14,10 +14,12 @@ REM   --force          : Force rebuild even if index exists
 REM   --verbose        : Show detailed progress
 REM   --dirs-file FILE : Use custom directory list (default: src\indexing\EngineDirs.txt)
 REM   --add-dir DIR    : Add specific directory to index
+REM   --batch-size N   : Override embedding batch size (1-64, default from .env)
 REM
 REM Examples:
 REM   rebuild-index.bat --force --verbose
 REM   rebuild-index.bat --add-dir "C:/Custom/Engine/Source"
+REM   rebuild-index.bat --batch-size 8 --force --verbose
 REM ====================================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -35,10 +37,14 @@ if not exist "%SCRIPT_DIR%..\config\.env" (
     exit /b 1
 )
 
-REM Load configuration
+REM Load configuration and set environment variables for Python
 for /f "usebackq tokens=1,* delims==" %%a in ("%SCRIPT_DIR%..\config\.env") do (
+    REM Set as environment variable for Python scripts
+    set "%%a=%%b"
+
+    REM Also keep batch-specific variables for display
     if "%%a"=="VECTOR_OUTPUT_DIR" set "VECTOR_DIR=%%b"
-    if "%%a"=="EMBED_MODEL" set "EMBED_MODEL=%%b"
+    if "%%a"=="EMBED_MODEL" set "EMBED_MODEL_DISPLAY=%%b"
 )
 
 if "%VECTOR_DIR%"=="" (
@@ -48,7 +54,8 @@ if "%VECTOR_DIR%"=="" (
 
 echo Configuration:
 echo   Vector Store: %VECTOR_DIR%
-echo   Embedding Model: %EMBED_MODEL%
+echo   Embedding Model: %EMBED_MODEL_DISPLAY%
+echo   Engine Root: %UE_ENGINE_ROOT%
 echo.
 
 REM Check if Python and venv exist
@@ -111,6 +118,11 @@ if /i "%~1"=="--add-dir" (
     set "BUILD_ARGS=--root %~2"
     shift
 )
+if /i "%~1"=="--batch-size" (
+    set "EMBED_BATCH_SIZE=%~2"
+    echo [INFO] Overriding batch size to %~2
+    shift
+)
 shift
 goto :parse_loop
 :end_parse
@@ -169,7 +181,7 @@ if %SHOW_PROGRESS%==1 (
 
 REM Run the build script
 cd /d "%SCRIPT_DIR%.."
-".venv\Scripts\python.exe" src\indexing\build_embeddings.py %BUILD_ARGS% --output-dir "%VECTOR_DIR%"
+".venv\Scripts\python.exe" src\indexing\build_embeddings.py %BUILD_ARGS% --project-dirs-file "src\indexing\ProjectDirs.txt" --output-dir "%VECTOR_DIR%"
 
 if errorlevel 1 (
     echo.
@@ -180,7 +192,24 @@ if errorlevel 1 (
 
 echo.
 echo ====================================================================
-echo Index Rebuild Complete!
+echo Index Build Complete! Running metadata enrichment...
+echo ====================================================================
+echo.
+
+REM Run metadata enrichment to create vector_meta_enriched.json
+echo [*] Enriching metadata with entity detection and UE5 macros...
+".venv\Scripts\python.exe" src\indexing\metadata_enricher.py "%VECTOR_DIR%\vector_meta.json" "%VECTOR_DIR%\vector_meta_enriched.json"
+
+if errorlevel 1 (
+    echo [WARNING] Metadata enrichment failed (index still usable)
+    echo The base index works fine, but advanced filtering may be limited
+) else (
+    echo [OK] Metadata enrichment complete
+)
+
+echo.
+echo ====================================================================
+echo Rebuild Complete!
 echo ====================================================================
 echo.
 

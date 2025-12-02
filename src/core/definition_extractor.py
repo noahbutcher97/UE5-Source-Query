@@ -181,7 +181,13 @@ class DefinitionExtractor:
         return results
 
     def _match_quality(self, query: str, candidate: str, fuzzy: bool) -> float:
-        """Calculate match quality (0.0 = no match, 1.0 = exact match)"""
+        """Calculate match quality (0.0 = no match, 1.0 = exact match)
+
+        Handles UE5 naming conventions with prefix stripping:
+        - F-prefix for structs (FHitResult)
+        - U/A/I-prefix for classes (UObject, AActor, IInterface)
+        - E-prefix for enums (ECollisionChannel)
+        """
         query_lower = query.lower()
         candidate_lower = candidate.lower()
 
@@ -193,28 +199,78 @@ class DefinitionExtractor:
         if query_lower == candidate_lower:
             return 0.95
 
-        if not fuzzy:
-            return 0.0  # Strict mode: no fuzzy matching
+        # UE5 prefix handling - strip common prefixes and compare
+        query_stripped = self._strip_ue_prefix(query)
+        candidate_stripped = self._strip_ue_prefix(candidate)
+        query_stripped_lower = query_stripped.lower()
+        candidate_stripped_lower = candidate_stripped.lower()
 
-        # Substring match
+        # Match without prefix (e.g., "HitResult" matches "FHitResult")
+        if query_stripped_lower == candidate_stripped_lower:
+            return 0.90  # High quality match
+
+        # Query missing prefix but candidate has it (e.g., "hitresult" vs "FHitResult")
+        if query_lower == candidate_stripped_lower:
+            return 0.88
+
+        # Candidate missing prefix but query has it (rare but possible)
+        if query_stripped_lower == candidate_lower:
+            return 0.85
+
+        if not fuzzy:
+            return 0.0  # Strict mode: no further fuzzy matching
+
+        # Substring match (with prefix stripped)
+        if query_stripped_lower in candidate_stripped_lower:
+            ratio = len(query_stripped_lower) / len(candidate_stripped_lower)
+            return 0.75 * ratio
+
+        # Original substring match (fallback)
         if query_lower in candidate_lower:
             ratio = len(query_lower) / len(candidate_lower)
-            return 0.7 * ratio
+            return 0.70 * ratio
 
-        # Prefix match
-        if candidate_lower.startswith(query_lower):
-            ratio = len(query_lower) / len(candidate_lower)
-            return 0.8 * ratio
+        # Prefix match (with UE prefix stripped)
+        if candidate_stripped_lower.startswith(query_stripped_lower):
+            ratio = len(query_stripped_lower) / len(candidate_stripped_lower)
+            return 0.80 * ratio
 
-        # Levenshtein distance (simple version)
-        distance = self._levenshtein(query_lower, candidate_lower)
-        max_len = max(len(query_lower), len(candidate_lower))
+        # Levenshtein distance on stripped names
+        distance = self._levenshtein(query_stripped_lower, candidate_stripped_lower)
+        max_len = max(len(query_stripped_lower), len(candidate_stripped_lower))
 
         if distance <= 2 and max_len > 3:  # Allow up to 2 typos
             similarity = 1.0 - (distance / max_len)
-            return 0.6 * similarity
+            return 0.65 * similarity
+
+        # Levenshtein on original (fallback)
+        distance_orig = self._levenshtein(query_lower, candidate_lower)
+        max_len_orig = max(len(query_lower), len(candidate_lower))
+
+        if distance_orig <= 2 and max_len_orig > 3:
+            similarity = 1.0 - (distance_orig / max_len_orig)
+            return 0.60 * similarity
 
         return 0.0
+
+    def _strip_ue_prefix(self, name: str) -> str:
+        """Strip common UE5 prefixes from entity names
+
+        Examples:
+        - FHitResult -> HitResult
+        - UObject -> Object
+        - AActor -> Actor
+        - IInterface -> Interface
+        - ECollisionChannel -> CollisionChannel
+        """
+        if len(name) < 2:
+            return name
+
+        # Check for UE5 prefix patterns
+        if name[0] in 'FUAIE' and name[1].isupper():
+            return name[1:]
+
+        return name
 
     def _levenshtein(self, s1: str, s2: str) -> int:
         """Calculate Levenshtein distance between two strings"""

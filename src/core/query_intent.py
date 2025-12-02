@@ -103,6 +103,33 @@ class QueryIntentAnalyzer:
         # Try to extract entity names from query
         entity_candidates = self._extract_entity_names(query)
 
+        # NEW: Detect bare entity names (single UE5 entity with minimal context)
+        # Examples: "FHitResult", "AActor", "UStaticMeshComponent"
+        if entity_candidates and not is_conceptual:
+            entity_name, entity_type = entity_candidates[0]
+
+            # Check if query is mostly just the entity name (bare lookup)
+            # Strip common words and see if entity name dominates
+            query_words = query.split()
+            significant_words = [w for w in query_words if len(w) > 2 and w.lower() not in ['the', 'what', 'where', 'find', 'show']]
+
+            is_bare_entity = (
+                len(significant_words) <= 2 and  # Query is very short
+                entity_name in query and         # Entity name is present
+                entity_type != EntityType.UNKNOWN  # Valid UE5 entity type detected
+            )
+
+            if is_bare_entity:
+                # Bare entity name - treat as definition query
+                return QueryIntent(
+                    query_type=QueryType.DEFINITION,
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    confidence=0.85,
+                    enhanced_query=query,
+                    reasoning=f"Bare entity name detected: {entity_type.value} {entity_name}"
+                )
+
         if entity_candidates and has_definition_hints and not is_conceptual:
             # Query like "FHitResult members" - try hybrid approach
             entity_name, entity_type = entity_candidates[0]

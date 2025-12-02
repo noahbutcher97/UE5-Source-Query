@@ -53,7 +53,8 @@ class DeploymentWizard:
         
         self.embed_model = tk.StringVar(value='microsoft/unixcoder-base')
         self.api_model = tk.StringVar(value='claude-3-haiku-20240307')
-        
+        self.embed_batch_size = tk.StringVar(value='16')
+
         self.log_queue = queue.Queue()
         self.root.after(100, self.process_log_queue)
         
@@ -189,6 +190,15 @@ class DeploymentWizard:
         api_model_combo['values'] = ('claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')
         api_model_combo.pack(fill=tk.X, pady=(0, 10))
 
+        # GPU Optimization
+        ttk.Label(frame, text="GPU Optimization", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
+
+        ttk.Label(frame, text="Embedding Batch Size:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        ttk.Label(frame, text="RTX 5090: Use 8-16 | RTX 4090/3090: Use 32+ | CPU: Use 1-4", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 5))
+        batch_size_combo = ttk.Combobox(frame, textvariable=self.embed_batch_size, state='readonly')
+        batch_size_combo['values'] = ('1', '2', '4', '8', '16', '32', '64')
+        batch_size_combo.pack(fill=tk.X, pady=(0, 10))
+
         # Save Button
         ttk.Button(frame, text="💾 Save Configuration", command=self.save_config_preview, style='Accent.TButton').pack(pady=20)
 
@@ -212,6 +222,7 @@ Vector Store: {self.vector_store_path.get()}
 Engine Path: {self.engine_path.get()}
 Embedding Model: {self.embed_model.get()}
 Claude Model: {self.api_model.get()}
+Batch Size: {self.embed_batch_size.get()}
 
 Target Directory: {self.target_dir.get()}
 GPU Support: {'Enabled' if self.gpu_support.get() else 'Disabled'}
@@ -714,6 +725,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 f.write(f"UE_ENGINE_ROOT={self.engine_path.get()}\n")
                 f.write(f"EMBED_MODEL={self.embed_model.get()}\n")
                 f.write(f"ANTHROPIC_MODEL={self.api_model.get()}\n")
+                f.write(f"EMBED_BATCH_SIZE={self.embed_batch_size.get()}\n")
             
             # 3. Create EngineDirs.txt
             if self.engine_path.get() and self.engine_dirs:
@@ -865,7 +877,35 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 self.log("Building Index...")
                 python_exe = target / ".venv" / "Scripts" / "python.exe"
                 build_script = target / "src" / "indexing" / "build_embeddings.py"
-                subprocess.run([str(python_exe), str(build_script)])
+
+                # Build arguments for index building
+                build_args = [
+                    str(python_exe),
+                    str(build_script),
+                    "--dirs-file", str(target / "src" / "indexing" / "EngineDirs.txt"),
+                    "--project-dirs-file", str(target / "src" / "indexing" / "ProjectDirs.txt"),
+                    "--output-dir", str(target / "data"),
+                    "--force",
+                    "--verbose"
+                ]
+
+                self.log("Running: " + " ".join(build_args[2:]))  # Log the arguments
+                result = subprocess.run(build_args, capture_output=True, text=True)
+
+                # Display build output
+                if result.stdout:
+                    for line in result.stdout.split('\n'):
+                        if line.strip():
+                            self.log(f"  {line}")
+                if result.stderr:
+                    for line in result.stderr.split('\n'):
+                        if line.strip():
+                            self.log(f"  [ERROR] {line}")
+
+                if result.returncode == 0:
+                    self.log("✓ Index built successfully")
+                else:
+                    self.log(f"✗ Index build failed with code {result.returncode}")
             
             # 6. Create Shortcut
             if self.create_shortcut.get():

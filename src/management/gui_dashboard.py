@@ -41,6 +41,7 @@ class UnifiedDashboard:
         self.vector_store_var = tk.StringVar(value=self.config_manager.get('VECTOR_OUTPUT_DIR', str(self.script_dir / 'data')))
         self.embed_model_var = tk.StringVar(value=self.config_manager.get('EMBED_MODEL', 'microsoft/unixcoder-base'))
         self.api_model_var = tk.StringVar(value=self.config_manager.get('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'))
+        self.embed_batch_size_var = tk.StringVar(value=self.config_manager.get('EMBED_BATCH_SIZE', '16'))
         self.query_scope_var = tk.StringVar(value="engine")
 
         self.create_layout()
@@ -171,16 +172,20 @@ class UnifiedDashboard:
         
         def _run():
             try:
-                # Run hybrid query
+                # Get configured embedding model
+                embed_model = self.embed_model_var.get()
+
+                # Run hybrid query with explicit model
                 results = hybrid_query(
                     question=query,
                     top_k=5,
                     scope=scope,
+                    embed_model_name=embed_model,  # Pass configured model
                     show_reasoning=False # We'll display it manually
                 )
-                
+
                 self.root.after(0, lambda: self.display_query_results(results))
-                
+
             except Exception as e:
                 self.root.after(0, lambda err=str(e): self.log_query_result(f"Error: {err}", clear=True, tag="error"))
             finally:
@@ -526,6 +531,17 @@ class UnifiedDashboard:
         api_model_combo['values'] = ('claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')
         api_model_combo.pack(fill=tk.X)
 
+        # GPU Optimization Section
+        gpu_frame = ttk.LabelFrame(frame, text=" GPU Optimization ", padding=15)
+        gpu_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(gpu_frame, text="Embedding Batch Size:", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=5)
+        ttk.Label(gpu_frame, text="RTX 5090: Use 8-16 | RTX 4090/3090: Use 32+ | CPU: Use 1-4", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 5))
+        batch_size_combo = ttk.Combobox(gpu_frame, textvariable=self.embed_batch_size_var, state='readonly')
+        batch_size_combo['values'] = ('1', '2', '4', '8', '16', '32', '64')
+        batch_size_combo.pack(fill=tk.X)
+        ttk.Label(gpu_frame, text="Smaller batches = more stable, larger batches = faster (if no errors)", font=Theme.FONT_NORMAL, foreground="#666", wraplength=500).pack(anchor=tk.W, pady=(5, 0))
+
         # Save Button
         ttk.Button(frame, text="💾 Save Configuration", command=self.save_configuration, style='Accent.TButton').pack(pady=20)
         
@@ -568,6 +584,7 @@ class UnifiedDashboard:
             'UE_ENGINE_ROOT': self.engine_path_var.get(),
             'EMBED_MODEL': self.embed_model_var.get(),
             'ANTHROPIC_MODEL': self.api_model_var.get(),
+            'EMBED_BATCH_SIZE': self.embed_batch_size_var.get(),
         }
 
         # Validate API key

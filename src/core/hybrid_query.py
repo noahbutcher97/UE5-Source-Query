@@ -179,17 +179,17 @@ def _extract_definitions(intent, scope: str = "engine") -> List[DefinitionResult
     file_paths = list(set(valid_paths))
 
     extractor = DefinitionExtractor(file_paths)
-    
-    # ... rest of extraction logic ...
-    # Route to appropriate extractor
+
+    # Route to appropriate extractor with fuzzy matching enabled
+    # This allows queries like "HitResult" to match "FHitResult"
     if intent.entity_type == EntityType.STRUCT:
-        return extractor.extract_struct(intent.entity_name)
+        return extractor.extract_struct(intent.entity_name, fuzzy=True)
     elif intent.entity_type == EntityType.CLASS:
-        return extractor.extract_class(intent.entity_name)
+        return extractor.extract_class(intent.entity_name, fuzzy=True)
     elif intent.entity_type == EntityType.ENUM:
-        return extractor.extract_enum(intent.entity_name)
+        return extractor.extract_enum(intent.entity_name, fuzzy=True)
     elif intent.entity_type == EntityType.FUNCTION:
-        return extractor.extract_function(intent.entity_name)
+        return extractor.extract_function(intent.entity_name, fuzzy=True)
 
     return []
 
@@ -214,9 +214,18 @@ def _semantic_search(query: str, top_k: int, timing: dict, intent=None, scope: s
 
     # Encode query
     t0 = time.perf_counter()
-    model = query_engine.get_model(embed_model_name or kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL))
+    model_name = embed_model_name or kwargs.get('embed_model_name', query_engine.DEFAULT_EMBED_MODEL)
+    model = query_engine.get_model(model_name)
     qvec = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
     timing['embed_s'] = time.perf_counter() - t0
+
+    # Validate dimensions match
+    if qvec.shape[0] != embeddings.shape[1]:
+        raise ValueError(
+            f"Dimension mismatch: Query vector has {qvec.shape[0]} dimensions (model: {model_name}), "
+            f"but vector store has {embeddings.shape[1]} dimensions. "
+            f"Please rebuild the index with the correct model, or change the embedding model in Configuration."
+        )
 
     # Perform search
     t1 = time.perf_counter()
