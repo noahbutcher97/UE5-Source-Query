@@ -184,6 +184,10 @@ def get_gpu_summary() -> Dict[str, any]:
     gpu_info = detect_nvidia_gpu()
     cuda_installed = check_cuda_installed()
 
+    # PyTorch 2.6.0 maximum supported compute capability
+    # SM 90 = Hopper (H100), SM 120 = Blackwell (RTX 5090) NOT YET SUPPORTED
+    PYTORCH_MAX_SM = (9, 0)  # Update when PyTorch adds SM 120 support
+
     summary = {
         "has_nvidia_gpu": gpu_info is not None,
         "gpu_name": gpu_info.name if gpu_info else None,
@@ -192,9 +196,21 @@ def get_gpu_summary() -> Dict[str, any]:
         "cuda_required": gpu_info.cuda_version_required if gpu_info else None,
         "cuda_installed": cuda_installed,
         "cuda_compatible": False,
+        "pytorch_compatible": False,
         "needs_cuda_install": False,
-        "download_url": None
+        "download_url": None,
+        "warning": None
     }
+
+    # Check PyTorch compatibility
+    if gpu_info:
+        gpu_sm = gpu_info.compute_capability
+        if gpu_sm[0] < PYTORCH_MAX_SM[0] or \
+           (gpu_sm[0] == PYTORCH_MAX_SM[0] and gpu_sm[1] <= PYTORCH_MAX_SM[1]):
+            summary["pytorch_compatible"] = True
+        else:
+            summary["pytorch_compatible"] = False
+            summary["warning"] = f"GPU compute capability SM {gpu_sm[0]}.{gpu_sm[1]} exceeds PyTorch 2.6.0 support (max SM {PYTORCH_MAX_SM[0]}.{PYTORCH_MAX_SM[1]}). GPU acceleration will not work. Recommend CPU-only installation until PyTorch adds support."
 
     if gpu_info and cuda_installed:
         # Check if installed CUDA version is sufficient
@@ -221,11 +237,19 @@ def get_gpu_requirements_text() -> str:
     if not gpu_info:
         return "No NVIDIA GPU detected. GPU acceleration will be disabled."
 
+    gpu_summary = get_gpu_summary()
     cuda_installed = check_cuda_installed()
 
     text = f"GPU Detected: {gpu_info.name}\n"
     text += f"Compute Capability: {gpu_info.compute_capability_str} ({gpu_info.sm_version})\n"
     text += f"CUDA Required: {gpu_info.cuda_version_required}+\n"
+
+    # Check PyTorch compatibility first
+    if not gpu_summary["pytorch_compatible"]:
+        text += f"\n[WARNING] {gpu_summary['warning']}\n"
+        text += "\nRecommendation: Use CPU-only installation for now.\n"
+        text += "GPU support will be available when PyTorch adds SM 120 support.\n"
+        return text
 
     if cuda_installed:
         text += f"CUDA Installed: {cuda_installed}\n"
@@ -235,11 +259,11 @@ def get_gpu_requirements_text() -> str:
 
         if installed_parts[0] > required_parts[0] or \
            (installed_parts[0] == required_parts[0] and installed_parts[1] >= required_parts[1]):
-            text += "✓ CUDA version is compatible!"
+            text += "[OK] CUDA version is compatible!"
         else:
-            text += f"✗ CUDA version too old. Please install CUDA {gpu_info.cuda_version_required}+"
+            text += f"[ERROR] CUDA version too old. Please install CUDA {gpu_info.cuda_version_required}+"
     else:
-        text += "✗ CUDA not installed\n"
+        text += "[ERROR] CUDA not installed\n"
         text += f"Please install CUDA {gpu_info.cuda_version_required} or later"
 
     return text

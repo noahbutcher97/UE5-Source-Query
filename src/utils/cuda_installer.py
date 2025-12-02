@@ -166,8 +166,9 @@ def get_gpu_requirements_file_content(cuda_version: str) -> str:
 
     return f"""# GPU-accelerated packages for CUDA {cuda_version}
 # PyTorch with CUDA support (this enables GPU for embeddings)
-torch==2.5.1+{torch_cuda}
-torchvision==0.20.1+{torch_cuda}
+# NOTE: Using 2.6.0+ due to security vulnerability CVE-2025-32434
+torch==2.6.0+{torch_cuda}
+torchvision==0.21.0+{torch_cuda}
 --extra-index-url https://download.pytorch.org/whl/{torch_cuda}
 
 # GPU-accelerated transformers (uses PyTorch GPU)
