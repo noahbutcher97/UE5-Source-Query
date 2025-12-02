@@ -120,6 +120,7 @@ struct FVector
 - **`--format FORMAT`** - Output format: `text`, `json`, `jsonl`, `xml`, `markdown`, `code` (default: `text`)
 - **`--no-code`** - Exclude code from output (metadata only)
 - **`--max-lines N`** - Maximum lines per code snippet (default: 50)
+- **`--filter FILTER`** - Filter results by entity type, macro, origin, etc. (see Filter Syntax below)
 
 ### Server Options
 - **`--port N`** - Server port (default: 8765)
@@ -127,6 +128,39 @@ struct FVector
 
 ### Legacy
 - **`--json`** - Output raw JSON (deprecated, use `--format json`)
+
+### Filter Syntax (NEW in v2.0)
+
+The `--filter` argument allows precise filtering of semantic search results using a simple query syntax.
+
+**Supported Filters:**
+- `type:ENTITY_TYPE` - Filter by entity type (`struct`, `class`, `enum`, `function`, `delegate`)
+- `macro:MACRO_NAME` - Filter by UE5 macro (`UPROPERTY`, `UCLASS`, `UFUNCTION`, `USTRUCT`)
+- `origin:ORIGIN` - Filter by origin (`engine`, `project`)
+- `entity:ENTITY_NAME` - Filter to specific entity (e.g., `FHitResult`)
+- `file:FILE_TYPE` - Filter by file type (`header`, `implementation`)
+- `boost:TYPE` - Enable boosting (`macros`, `entities`)
+
+**Operators:**
+- `AND` - Combine multiple filters (all must match)
+- `OR` - Not yet supported
+
+**Examples:**
+```bash
+# Find all struct definitions with UPROPERTY
+ask.bat "physics data" --filter "type:struct AND macro:UPROPERTY"
+
+# Find classes from engine with UCLASS macro
+ask.bat "actor component" --filter "type:class AND origin:engine AND macro:UCLASS"
+
+# Find FHitResult in header files only
+ask.bat "collision data" --filter "entity:FHitResult AND file:header"
+
+# Boost results with macro presence
+ask.bat "vehicle state" --filter "type:struct AND boost:macros"
+```
+
+**Note:** Filtering requires enriched metadata. If results aren't filtered as expected, the vector store may need metadata enrichment.
 
 ---
 

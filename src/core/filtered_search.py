@@ -48,6 +48,8 @@ class FilteredSearch:
         origin: Optional[str] = None,  # 'engine' or 'project'
         has_uproperty: Optional[bool] = None,
         has_uclass: Optional[bool] = None,
+        has_ufunction: Optional[bool] = None,
+        has_ustruct: Optional[bool] = None,
         file_type: Optional[str] = None,  # 'header' or 'implementation'
         # Boosting
         boost_entities: Optional[List[str]] = None,
@@ -67,6 +69,8 @@ class FilteredSearch:
             origin: Filter by origin ('engine', 'project')
             has_uproperty: Filter by UPROPERTY presence
             has_uclass: Filter by UCLASS presence
+            has_ufunction: Filter by UFUNCTION presence
+            has_ustruct: Filter by USTRUCT presence
             file_type: 'header' or 'implementation'
             boost_entities: List of entities to boost in ranking
             boost_macros: Boost chunks with UE5 macros
@@ -84,6 +88,8 @@ class FilteredSearch:
             origin=origin,
             has_uproperty=has_uproperty,
             has_uclass=has_uclass,
+            has_ufunction=has_ufunction,
+            has_ustruct=has_ustruct,
             file_type=file_type
         )
 
@@ -127,6 +133,8 @@ class FilteredSearch:
         origin: Optional[str],
         has_uproperty: Optional[bool],
         has_uclass: Optional[bool],
+        has_ufunction: Optional[bool],
+        has_ustruct: Optional[bool],
         file_type: Optional[str]
     ) -> List[int]:
         """Apply filters and return valid indices"""
@@ -168,6 +176,20 @@ class FilteredSearch:
                 if not self.is_enriched:
                     continue
                 if meta.get('has_uclass', False) != has_uclass:
+                    continue
+
+            # UFUNCTION filter
+            if has_ufunction is not None:
+                if not self.is_enriched:
+                    continue
+                if meta.get('has_ufunction', False) != has_ufunction:
+                    continue
+
+            # USTRUCT filter
+            if has_ustruct is not None:
+                if not self.is_enriched:
+                    continue
+                if meta.get('has_ustruct', False) != has_ustruct:
                     continue
 
             # File type filter

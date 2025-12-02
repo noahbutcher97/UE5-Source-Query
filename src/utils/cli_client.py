@@ -48,6 +48,10 @@ def main():
     parser.add_argument("--max-lines", type=int, default=50,
                        help="Maximum lines per code snippet (default: 50)")
 
+    # Filter options (NEW - Phase 2)
+    parser.add_argument("--filter", type=str, default=None,
+                       help="Filter results (e.g., 'type:struct AND macro:UPROPERTY')")
+
     # Legacy option (deprecated but maintained for backwards compatibility)
     parser.add_argument("--json", action="store_true", help="Output raw JSON (deprecated, use --format json)")
 
@@ -69,15 +73,30 @@ def main():
     if not results:
         if not args.no_server and not args.json:
             print("[INFO] Server unavailable. Starting local engine (Cold Start)...")
-        
+
         # Initialize engine locally
         try:
             engine = HybridQueryEngine(TOOL_ROOT)
+
+            # Parse filter string if provided
+            filter_kwargs = {}
+            if args.filter:
+                from core.filter_builder import FilterBuilder
+                try:
+                    parsed_filter = FilterBuilder.parse_and_validate(args.filter)
+                    filter_kwargs = parsed_filter.to_search_kwargs()
+                    if not args.json:
+                        print(f"[INFO] Applied filters: {filter_kwargs}")
+                except ValueError as e:
+                    print(f"[ERROR] {e}", file=sys.stderr)
+                    sys.exit(1)
+
             results = engine.query(
                 question=question,
                 top_k=args.top_k,
                 scope=args.scope,
-                show_reasoning=not args.json
+                show_reasoning=not args.json,
+                **filter_kwargs  # Pass parsed filters to engine
             )
         except Exception as e:
             print(f"[ERROR] Engine failed: {e}")
