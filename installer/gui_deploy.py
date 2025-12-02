@@ -55,6 +55,10 @@ class DeploymentWizard:
         self.api_model = tk.StringVar(value='claude-3-haiku-20240307')
         self.embed_batch_size = tk.StringVar(value='16')
 
+        self.current_process = None
+        self.is_running = False
+        self.cancelled = False
+
         self.log_queue = queue.Queue()
         self.root.after(100, self.process_log_queue)
         
@@ -352,8 +356,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         frame = ttk.Frame(self.tab_execute, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         
-        self.btn_install = ttk.Button(frame, text="▶ Start Installation", command=self.start_install, style="Accent.TButton")
-        self.btn_install.pack(pady=(0, 20))
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=(0, 20))
+        
+        self.btn_install = ttk.Button(btn_frame, text="▶ Start Installation", command=self.start_install, style="Accent.TButton")
+        self.btn_install.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_cancel = ttk.Button(btn_frame, text="Close", command=self.cancel_or_close)
+        self.btn_cancel.pack(side=tk.LEFT, padx=5)
         
         self.progress = ttk.Progressbar(frame, mode='determinate')
         self.progress.pack(fill=tk.X, pady=(0, 10))
@@ -676,8 +686,27 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
     def start_install(self):
         self.btn_install.config(state=tk.DISABLED)
+        self.btn_cancel.config(text="Cancel")
+        self.is_running = True
+        self.cancelled = False
         self.notebook.select(self.tab_execute)
         threading.Thread(target=self.run_install_process, daemon=True).start()
+
+    def cancel_or_close(self):
+        if self.is_running:
+            if messagebox.askyesno("Cancel", "Are you sure you want to cancel the current operation?"):
+                self.cancelled = True
+                if self.current_process:
+                    try:
+                        self.current_process.terminate()
+                    except:
+                        pass
+                self.log("[CANCELLED] Operation cancelled by user.")
+                self.is_running = False
+                self.btn_install.config(state=tk.NORMAL)
+                self.btn_cancel.config(text="Close")
+        else:
+            self.root.destroy()
 
     def _create_windows_shortcut(self, target, shortcut_path, working_dir="", icon=None):
         """Create a Windows shortcut (.lnk) using VBScript"""
@@ -850,11 +879,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                                         "GPU-accelerated packages will still be installed."
                                     ))
 
-                            threading.Thread(target=install_cuda_thread, daemon=True).start()
+                            # Use a non-daemon thread so we wait for completion
+                            install_thread = threading.Thread(target=install_cuda_thread, daemon=False)
+                            install_thread.start()
 
-                            # Wait a moment for thread to start
-                            import time
-                            time.sleep(2)
+                            # Wait for CUDA installation to complete before proceeding
+                            self.log("Waiting for CUDA installation to complete...")
+                            install_thread.join()  # Wait for thread to finish
+                            self.log("CUDA installation thread completed.")
                         else:
                             self.log("Skipping CUDA installation. GPU support will be limited.")
                             messagebox.showinfo(
@@ -868,44 +900,50 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     self.log("Installing GPU-accelerated packages...")
                     gpu_req_file = target / "requirements-gpu.txt"
                     create_gpu_requirements_file(gpu_req_file, cuda_required)
-                    subprocess.run([str(pip), "install", "-r", str(gpu_req_file)])
-                    self.log("✓ GPU packages installed")
+                    result = subprocess.run([str(pip), "install", "-r", str(gpu_req_file)],
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        self.log("✓ GPU packages installed successfully")
+                    else:
+                        self.log(f"⚠ Warning: GPU package installation had issues: {result.stderr[:200]}")
+                        self.log("  Index build will proceed, but may fall back to CPU")
                 else:
                     self.log("No NVIDIA GPU detected. Skipping GPU setup.")
 
             if self.build_index.get():
                 self.log("Building Index...")
-                python_exe = target / ".venv" / "Scripts" / "python.exe"
-                build_script = target / "src" / "indexing" / "build_embeddings.py"
+                # Use the robust batch script which handles env vars and paths correctly
+                rebuild_script = target / "tools" / "rebuild-index.bat"
+                
+                cmd = [str(rebuild_script), "--force", "--verbose"]
 
-                # Build arguments for index building
-                build_args = [
-                    str(python_exe),
-                    str(build_script),
-                    "--dirs-file", str(target / "src" / "indexing" / "EngineDirs.txt"),
-                    "--project-dirs-file", str(target / "src" / "indexing" / "ProjectDirs.txt"),
-                    "--output-dir", str(target / "data"),
-                    "--force",
-                    "--verbose"
-                ]
-
-                self.log("Running: " + " ".join(build_args[2:]))  # Log the arguments
-                result = subprocess.run(build_args, capture_output=True, text=True)
-
-                # Display build output
-                if result.stdout:
-                    for line in result.stdout.split('\n'):
-                        if line.strip():
-                            self.log(f"  {line}")
-                if result.stderr:
-                    for line in result.stderr.split('\n'):
-                        if line.strip():
-                            self.log(f"  [ERROR] {line}")
-
-                if result.returncode == 0:
-                    self.log("✓ Index built successfully")
+                self.log(f"Running: {rebuild_script.name} --force --verbose")
+                
+                self.current_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                    cwd=str(target)
+                )
+                
+                # Read output line by line
+                if self.current_process.stdout:
+                    for line in iter(self.current_process.stdout.readline, ''):
+                        if self.cancelled: break
+                        if line:
+                            self.root.after(0, lambda l=line: self.log(f"  {l.strip()}"))
+                
+                if not self.cancelled:
+                    self.current_process.wait()
+                    process = self.current_process
+                
+                if process.returncode == 0:
+                    self.root.after(0, lambda: self.log("✓ Index built successfully"))
                 else:
-                    self.log(f"✗ Index build failed with code {result.returncode}")
+                    self.root.after(0, lambda: self.log(f"✗ Index build failed with code {process.returncode}"))
             
             # 6. Create Shortcut
             if self.create_shortcut.get():
@@ -926,10 +964,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             messagebox.showinfo("Success", "Installation Complete!")
             
         except Exception as e:
-            self.log(f"ERROR: {e}")
-            messagebox.showerror("Error", str(e))
+            if not self.cancelled:
+                self.log(f"ERROR: {e}")
+                messagebox.showerror("Error", str(e))
         finally:
+            self.is_running = False
+            self.current_process = None
             self.btn_install.config(state=tk.NORMAL)
+            self.btn_cancel.config(text="Close")
 
     def log(self, msg):
         self.log_queue.put(msg)

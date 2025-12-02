@@ -192,23 +192,6 @@ if errorlevel 1 (
 
 echo.
 echo ====================================================================
-echo Index Build Complete! Running metadata enrichment...
-echo ====================================================================
-echo.
-
-REM Run metadata enrichment to create vector_meta_enriched.json
-echo [*] Enriching metadata with entity detection and UE5 macros...
-".venv\Scripts\python.exe" src\indexing\metadata_enricher.py "%VECTOR_DIR%\vector_meta.json" "%VECTOR_DIR%\vector_meta_enriched.json"
-
-if errorlevel 1 (
-    echo [WARNING] Metadata enrichment failed (index still usable)
-    echo The base index works fine, but advanced filtering may be limited
-) else (
-    echo [OK] Metadata enrichment complete
-)
-
-echo.
-echo ====================================================================
 echo Rebuild Complete!
 echo ====================================================================
 echo.
