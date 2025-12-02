@@ -35,7 +35,7 @@ def query_server(question: str, top_k: int, scope: str, port: int = 8765) -> dic
 
 def main():
     parser = argparse.ArgumentParser(description="CLI Client for UE5 Source Query")
-    parser.add_argument("question", nargs="+", help="Query text")
+    parser.add_argument("question", nargs="*", help="Query text (not required if --batch-file used)")
     parser.add_argument("--top-k", type=int, default=5, help="Results to return")
     parser.add_argument("--scope", default="engine", choices=["engine", "project", "all"])
 
@@ -55,11 +55,40 @@ def main():
     # Legacy option (deprecated but maintained for backwards compatibility)
     parser.add_argument("--json", action="store_true", help="Output raw JSON (deprecated, use --format json)")
 
+    # Batch processing options (NEW - Phase 4)
+    parser.add_argument("--batch-file", type=str, default=None,
+                       help="Process multiple queries from JSONL file")
+    parser.add_argument("--output", type=str, default=None,
+                       help="Output file for batch results (default: stdout)")
+
     # Server options
     parser.add_argument("--port", type=int, default=8765, help="Server port")
     parser.add_argument("--no-server", action="store_true", help="Force local execution (ignore server)")
 
     args = parser.parse_args()
+
+    # Handle batch mode
+    if args.batch_file:
+        from core.batch_query import BatchQueryRunner
+        from pathlib import Path
+
+        input_file = Path(args.batch_file)
+        output_file = Path(args.output) if args.output else None
+
+        if not input_file.exists():
+            print(f"[ERROR] Batch file not found: {input_file}", file=sys.stderr)
+            sys.exit(1)
+
+        runner = BatchQueryRunner(TOOL_ROOT, verbose=not args.json)
+        runner.run_batch_file(input_file, output_file)
+        return
+
+    # Normal single query mode
+    if not args.question:
+        print("[ERROR] Question required (unless using --batch-file)", file=sys.stderr)
+        parser.print_help()
+        sys.exit(1)
+
     question = " ".join(args.question)
 
     # 1. Try Server
