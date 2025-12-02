@@ -769,11 +769,12 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
                     capability = torch.cuda.get_device_capability(0)
                     sm_version = capability[0] * 10 + capability[1]
 
-                    # PyTorch 2.6.0 max supported is SM 90 (Hopper)
-                    if sm_version > 90:
+                    # PyTorch 2.9.1 with CUDA 12.8 supports up to SM 12.0 (Blackwell - RTX 50 series)
+                    if sm_version > 120:
                         print(f"GPU Compute: SM {capability[0]}.{capability[1]} (using PTX compatibility mode)")
                         print(f"Performance: ~40-60x faster than CPU (native support would be 100-200x)")
                         print(f"Status: GPU acceleration active via JIT compilation")
+                        print(f"Note: Consider updating PyTorch when native support for SM {capability[0]}.{capability[1]} is available")
                     else:
                         print(f"GPU Compute: SM {capability[0]}.{capability[1]} (native support)")
                         print(f"Using CUDA for embeddings (expect 100-200x speedup)")
@@ -790,8 +791,8 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
                 capability = torch.cuda.get_device_capability(0)
                 sm_version = capability[0] * 10 + capability[1]
                 print(f"GPU forced: {gpu_name}")
-                if sm_version > 90:
-                    print(f"Note: Using PTX compatibility mode for SM {capability[0]}.{capability[1]}")
+                if sm_version > 120:
+                    print(f"Note: Using PTX compatibility mode for SM {capability[0]}.{capability[1]} (PyTorch 2.9.1 max native support: SM 12.0)")
         except Exception as e:
             print(f"Error: Failed to use GPU: {e}")
             raise

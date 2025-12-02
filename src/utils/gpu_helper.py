@@ -184,9 +184,11 @@ def get_gpu_summary() -> Dict[str, any]:
     gpu_info = detect_nvidia_gpu()
     cuda_installed = check_cuda_installed()
 
-    # PyTorch 2.6.0 maximum supported compute capability
-    # SM 90 = Hopper (H100), SM 120 = Blackwell (RTX 5090) NOT YET SUPPORTED
-    PYTORCH_MAX_SM = (9, 0)  # Update when PyTorch adds SM 120 support
+    # PyTorch 2.9.1 with CUDA 12.8 supports up to SM 12.0 (Blackwell - RTX 50 series)
+    # SM 120 = Blackwell (RTX 5090) - FULLY SUPPORTED as of PyTorch 2.9.1+cu128
+    # SM 90 = Hopper (H100)
+    # SM 89 = Ada Lovelace (RTX 40 series)
+    PYTORCH_MAX_SM = (12, 0)  # PyTorch 2.9.1+cu128 native support
 
     summary = {
         "has_nvidia_gpu": gpu_info is not None,
@@ -199,7 +201,8 @@ def get_gpu_summary() -> Dict[str, any]:
         "pytorch_compatible": False,
         "needs_cuda_install": False,
         "download_url": None,
-        "warning": None
+        "warning": None,
+        "pytorch_mode": "native"  # "native" or "ptx_jit"
     }
 
     # Check PyTorch compatibility
@@ -208,9 +211,14 @@ def get_gpu_summary() -> Dict[str, any]:
         if gpu_sm[0] < PYTORCH_MAX_SM[0] or \
            (gpu_sm[0] == PYTORCH_MAX_SM[0] and gpu_sm[1] <= PYTORCH_MAX_SM[1]):
             summary["pytorch_compatible"] = True
+            summary["pytorch_mode"] = "native"
+        elif gpu_sm[0] <= 13:  # Future GPUs might work via PTX JIT
+            summary["pytorch_compatible"] = True
+            summary["pytorch_mode"] = "ptx_jit"
+            summary["warning"] = f"GPU compute capability SM {gpu_sm[0]}.{gpu_sm[1]} exceeds PyTorch 2.9.1 native support (max SM {PYTORCH_MAX_SM[0]}.{PYTORCH_MAX_SM[1]}). Will use PTX JIT compatibility mode with reduced performance (40-60x vs 100-200x speedup)."
         else:
             summary["pytorch_compatible"] = False
-            summary["warning"] = f"GPU compute capability SM {gpu_sm[0]}.{gpu_sm[1]} exceeds PyTorch 2.6.0 support (max SM {PYTORCH_MAX_SM[0]}.{PYTORCH_MAX_SM[1]}). GPU acceleration will not work. Recommend CPU-only installation until PyTorch adds support."
+            summary["warning"] = f"GPU compute capability SM {gpu_sm[0]}.{gpu_sm[1]} is too new for current PyTorch version. GPU acceleration may not work. Consider CPU-only installation or wait for PyTorch update."
 
     if gpu_info and cuda_installed:
         # Check if installed CUDA version is sufficient
@@ -248,8 +256,13 @@ def get_gpu_requirements_text() -> str:
     if not gpu_summary["pytorch_compatible"]:
         text += f"\n[WARNING] {gpu_summary['warning']}\n"
         text += "\nRecommendation: Use CPU-only installation for now.\n"
-        text += "GPU support will be available when PyTorch adds SM 120 support.\n"
+        text += "GPU support will be available when PyTorch updates to support this architecture.\n"
         return text
+
+    # Check if using PTX JIT mode
+    if gpu_summary.get("pytorch_mode") == "ptx_jit":
+        text += f"\n[INFO] {gpu_summary['warning']}\n"
+        text += "GPU acceleration will still work, but consider updating PyTorch when native support is available.\n"
 
     if cuda_installed:
         text += f"CUDA Installed: {cuda_installed}\n"
