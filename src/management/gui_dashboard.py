@@ -787,6 +787,15 @@ class UnifiedDashboard:
         def _run():
             try:
                 script = self.script_dir / "tools" / "rebuild-index.bat"
+
+                # CRITICAL: Pass environment variables to subprocess
+                # Without this, EMBED_BATCH_SIZE defaults to 16, causing 8-10x slowdown
+                import os
+                env = os.environ.copy()
+                env['EMBED_BATCH_SIZE'] = self.embed_batch_size_var.get()
+                env['VECTOR_OUTPUT_DIR'] = self.config_manager.get('VECTOR_OUTPUT_DIR', str(self.script_dir / "data"))
+                env['UE_ENGINE_ROOT'] = self.engine_path_var.get()
+
                 self.current_process = subprocess.Popen(
                     [str(script), "--verbose", "--force"],
                     stdout=subprocess.PIPE,
@@ -794,7 +803,8 @@ class UnifiedDashboard:
                     text=True,
                     bufsize=1,
                     universal_newlines=True,
-                    cwd=str(self.script_dir)
+                    cwd=str(self.script_dir),
+                    env=env  # Pass environment variables
                 )
                 
                 if self.current_process.stdout:
