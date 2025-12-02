@@ -177,11 +177,15 @@ class UnifiedDashboard:
         file_combo = ttk.Combobox(filter_row1, textvariable=self.filter_file_type_var, values=file_types, state="readonly", width=15)
         file_combo.pack(side=tk.LEFT)
 
-        # Second row: Boost options
+        # Second row: Boost options and Clear button
         filter_row2 = ttk.Frame(filters_frame)
         filter_row2.pack(fill=tk.X)
 
         ttk.Checkbutton(filter_row2, text="Boost results with UE5 macros", variable=self.filter_boost_macros_var).pack(side=tk.LEFT)
+
+        # Clear Filters button
+        btn_clear_filters = ttk.Button(filter_row2, text="Clear All Filters", command=self.clear_filters)
+        btn_clear_filters.pack(side=tk.RIGHT, padx=(10, 0))
 
         # Results Section
         results_frame = ttk.LabelFrame(frame, text=" Results ", padding=10)
@@ -278,11 +282,25 @@ class UnifiedDashboard:
         self.results_text.insert(tk.END, f"Query Type: {intent.get('type', 'Unknown')}\n", "header")
         if intent.get('entity_name'):
             self.results_text.insert(tk.END, f"Target Entity: {intent.get('entity_name')}\n")
-        
+
+        # Show active filters if any
+        active_filters = []
+        if self.filter_entity_type_var.get():
+            active_filters.append(f"type={self.filter_entity_type_var.get()}")
+        if self.filter_macro_var.get():
+            active_filters.append(f"macro={self.filter_macro_var.get()}")
+        if self.filter_file_type_var.get():
+            active_filters.append(f"file={self.filter_file_type_var.get()}")
+        if self.filter_boost_macros_var.get():
+            active_filters.append("boost=macros")
+
+        if active_filters:
+            self.results_text.insert(tk.END, f"Active Filters: {', '.join(active_filters)}\n", "highlight")
+
         reasoning = intent.get('reasoning')
         if reasoning:
             self.results_text.insert(tk.END, f"\nReasoning: {reasoning}\n", "code")
-            
+
         self.results_text.insert(tk.END, "-" * 60 + "\n\n")
 
         # 2. Definitions
@@ -320,6 +338,13 @@ class UnifiedDashboard:
             self.results_text.delete(1.0, tk.END)
         self.results_text.insert(tk.END, message + "\n", tag)
         self.results_text.config(state=tk.DISABLED)
+
+    def clear_filters(self):
+        """Clear all filter selections"""
+        self.filter_entity_type_var.set("")
+        self.filter_macro_var.set("")
+        self.filter_file_type_var.set("")
+        self.filter_boost_macros_var.set(False)
 
     def build_sources_tab(self):
         # Use PanedWindow for responsive vertical split

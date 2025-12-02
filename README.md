@@ -441,6 +441,34 @@ results = search.search(qvec, entity_type="struct", has_uproperty=True)
 results = search.search(qvec, boost_entities=["FHitResult"], boost_macros=True)
 ```
 
+### 4. Batch Query Processing (NEW in v2.3)
+
+```bash
+# Create a JSONL file with multiple queries
+# File: queries.jsonl
+{"question": "FHitResult members", "top_k": 3, "scope": "engine"}
+{"question": "struct FVector", "filter": "type:struct"}
+{"question": "collision detection", "top_k": 5}
+
+# Process all queries at once
+ask.bat --batch-file queries.jsonl --output results.jsonl
+
+# Results are written to results.jsonl in JSONL format:
+{"query_id": 0, "status": "success", "results": {...}, "timing": {...}}
+{"query_id": 1, "status": "success", "results": {...}, "timing": {...}}
+{"query_id": 2, "status": "success", "results": {...}, "timing": {...}}
+
+# See examples/sample_batch_queries.jsonl for more examples
+# See docs/AI_AGENT_GUIDE.md for complete batch processing documentation
+```
+
+**Batch Processing Features:**
+- Stream processing (memory efficient)
+- Single engine instance (fast)
+- Per-query error handling (continues on failure)
+- Full filter support per query
+- Progress reporting to stderr
+
 ## Performance
 
 | Operation | Time | Notes |

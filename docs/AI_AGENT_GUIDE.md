@@ -122,6 +122,10 @@ struct FVector
 - **`--max-lines N`** - Maximum lines per code snippet (default: 50)
 - **`--filter FILTER`** - Filter results by entity type, macro, origin, etc. (see Filter Syntax below)
 
+### Batch Processing (NEW in v2.3)
+- **`--batch-file FILE`** - Process multiple queries from JSONL input file
+- **`--output FILE`** - Output file for batch results (default: stdout)
+
 ### Server Options
 - **`--port N`** - Server port (default: 8765)
 - **`--no-server`** - Force local execution (bypass server)
@@ -161,6 +165,64 @@ ask.bat "vehicle state" --filter "type:struct AND boost:macros"
 ```
 
 **Note:** Filtering requires enriched metadata. If results aren't filtered as expected, the vector store may need metadata enrichment.
+
+### Batch Processing (NEW in v2.3)
+
+Process multiple queries efficiently from a JSONL input file.
+
+**Input Format (JSONL):**
+```jsonl
+{"question": "FHitResult members", "top_k": 3, "scope": "engine"}
+{"question": "struct FVector", "filter": "type:struct"}
+{"question": "collision detection", "top_k": 5, "scope": "all"}
+```
+
+**Output Format (JSONL):**
+```jsonl
+{"query_id": 0, "status": "success", "results": {...}, "timing": {...}}
+{"query_id": 1, "status": "success", "results": {...}, "timing": {...}}
+{"query_id": 2, "status": "success", "results": {...}, "timing": {...}}
+```
+
+**Basic Usage:**
+```bash
+# Process batch and save to file
+ask.bat --batch-file queries.jsonl --output results.jsonl
+
+# Stream to stdout (pipe to another tool)
+ask.bat --batch-file queries.jsonl > results.jsonl
+
+# Quiet mode (no progress output)
+ask.bat --batch-file queries.jsonl --json --output results.jsonl
+```
+
+**Batch Query Fields:**
+- `question` (required) - The query text
+- `top_k` (optional) - Number of results (default: 5)
+- `scope` (optional) - Search scope: engine, project, all (default: engine)
+- `filter` (optional) - Filter string (e.g., "type:struct AND macro:UPROPERTY")
+- `show_reasoning` (optional) - Show query analysis (default: false)
+
+**Batch Result Fields:**
+- `query_id` - Sequential ID starting from 0
+- `question` - Original query text
+- `status` - "success" or "error"
+- `results` - Full query results (same as single query)
+- `error` - Error message if status is "error"
+- `timing` - Performance metrics including batch_total_s
+
+**Features:**
+- Stream processing (memory efficient, processes one query at a time)
+- Engine reuse (single engine instance for all queries)
+- Per-query error handling (continues processing on failures)
+- Progress reporting to stderr (results to stdout/file)
+- Full filter support in batch mode
+
+**Use Cases:**
+- Bulk API lookups for documentation generation
+- Automated code analysis workflows
+- Testing query variations
+- Building knowledge bases from UE5 source
 
 ---
 

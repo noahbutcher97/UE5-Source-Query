@@ -13,6 +13,8 @@ REM   --format FORMAT        Output format: text, json, jsonl, xml, markdown, co
 REM   --no-code              Exclude code from output (metadata only)
 REM   --max-lines N          Max lines per code snippet (default: 50)
 REM   --filter FILTER        Filter results (e.g., 'type:struct AND macro:UPROPERTY')
+REM   --batch-file FILE      Process multiple queries from JSONL file
+REM   --output FILE          Output file for batch results (default: stdout)
 REM   --json                 Output raw JSON (deprecated, use --format json)
 REM   --port N               Server port (default: 8765)
 REM   --no-server            Force local execution
@@ -23,6 +25,7 @@ REM   ask.bat "FHitResult" --format json
 REM   ask.bat "collision detection" --format markdown --no-code
 REM   ask.bat "struct FVector" --format code --max-lines 20
 REM   ask.bat "physics data" --filter "type:struct AND macro:UPROPERTY"
+REM   ask.bat --batch-file queries.jsonl --output results.jsonl
 
 set "TOOL_ROOT=%~dp0"
 
