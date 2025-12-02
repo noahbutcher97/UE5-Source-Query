@@ -43,7 +43,13 @@ class UnifiedDashboard:
         self.api_model_var = tk.StringVar(value=self.config_manager.get('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'))
         self.embed_batch_size_var = tk.StringVar(value=self.config_manager.get('EMBED_BATCH_SIZE', '16'))
         self.query_scope_var = tk.StringVar(value="engine")
-        
+
+        # Filter variables
+        self.filter_entity_type_var = tk.StringVar(value="")
+        self.filter_macro_var = tk.StringVar(value="")
+        self.filter_file_type_var = tk.StringVar(value="")
+        self.filter_boost_macros_var = tk.BooleanVar(value=False)
+
         self.engine = None
 
         self.current_process = None
@@ -143,10 +149,39 @@ class UnifiedDashboard:
         options_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Label(options_frame, text="Scope:", font=Theme.FONT_BOLD).pack(side=tk.LEFT, padx=(0, 5))
-        
+
         scopes = [("Engine API", "engine"), ("Project Code", "project"), ("All", "all")]
         for label, val in scopes:
             ttk.Radiobutton(options_frame, text=label, variable=self.query_scope_var, value=val).pack(side=tk.LEFT, padx=10)
+
+        # Advanced Filters Section
+        filters_frame = ttk.LabelFrame(input_frame, text=" Advanced Filters (Optional) ", padding=10)
+        filters_frame.pack(fill=tk.X, pady=(10, 0))
+
+        # First row: Entity Type and Macro
+        filter_row1 = ttk.Frame(filters_frame)
+        filter_row1.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(filter_row1, text="Entity Type:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        entity_types = ["", "struct", "class", "enum", "function", "delegate"]
+        entity_combo = ttk.Combobox(filter_row1, textvariable=self.filter_entity_type_var, values=entity_types, state="readonly", width=12)
+        entity_combo.pack(side=tk.LEFT, padx=(0, 15))
+
+        ttk.Label(filter_row1, text="UE5 Macro:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        macros = ["", "UPROPERTY", "UCLASS", "UFUNCTION", "USTRUCT"]
+        macro_combo = ttk.Combobox(filter_row1, textvariable=self.filter_macro_var, values=macros, state="readonly", width=12)
+        macro_combo.pack(side=tk.LEFT, padx=(0, 15))
+
+        ttk.Label(filter_row1, text="File Type:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        file_types = ["", "header", "implementation"]
+        file_combo = ttk.Combobox(filter_row1, textvariable=self.filter_file_type_var, values=file_types, state="readonly", width=15)
+        file_combo.pack(side=tk.LEFT)
+
+        # Second row: Boost options
+        filter_row2 = ttk.Frame(filters_frame)
+        filter_row2.pack(fill=tk.X)
+
+        ttk.Checkbutton(filter_row2, text="Boost results with UE5 macros", variable=self.filter_boost_macros_var).pack(side=tk.LEFT)
 
         # Results Section
         results_frame = ttk.LabelFrame(frame, text=" Results ", padding=10)
@@ -186,13 +221,43 @@ class UnifiedDashboard:
                 # Get configured embedding model
                 embed_model = self.embed_model_var.get()
 
-                # Run hybrid query with explicit model
+                # Build filter kwargs from UI selections
+                filter_kwargs = {}
+
+                # Entity type filter
+                entity_type = self.filter_entity_type_var.get()
+                if entity_type:
+                    filter_kwargs['entity_type'] = entity_type
+
+                # Macro filter
+                macro = self.filter_macro_var.get()
+                if macro:
+                    if macro == "UPROPERTY":
+                        filter_kwargs['has_uproperty'] = True
+                    elif macro == "UCLASS":
+                        filter_kwargs['has_uclass'] = True
+                    elif macro == "UFUNCTION":
+                        filter_kwargs['has_ufunction'] = True
+                    elif macro == "USTRUCT":
+                        filter_kwargs['has_ustruct'] = True
+
+                # File type filter
+                file_type = self.filter_file_type_var.get()
+                if file_type:
+                    filter_kwargs['file_type'] = file_type
+
+                # Boost macros option
+                if self.filter_boost_macros_var.get():
+                    filter_kwargs['boost_macros'] = True
+
+                # Run hybrid query with explicit model and filters
                 results = self.engine.query(
                     question=query,
                     top_k=5,
                     scope=scope,
                     embed_model_name=embed_model,  # Pass configured model
-                    show_reasoning=False # We'll display it manually
+                    show_reasoning=False,  # We'll display it manually
+                    **filter_kwargs  # Pass filter parameters
                 )
 
                 self.root.after(0, lambda: self.display_query_results(results))
