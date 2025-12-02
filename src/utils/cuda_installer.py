@@ -171,7 +171,7 @@ def get_gpu_requirements_file_content(cuda_version: str) -> str:
 # PyTorch with CUDA support (this enables GPU for embeddings)
 # NOTE: Using 2.9.1+ for native RTX 5090 (SM 12.0) support and security fixes
 torch==2.9.1+{torch_cuda}
-torchvision==0.21.1+{torch_cuda}
+torchvision==0.24.1+{torch_cuda}
 --extra-index-url https://download.pytorch.org/whl/{torch_cuda}
 
 # GPU-accelerated transformers (uses PyTorch GPU)
