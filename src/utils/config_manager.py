@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from src.utils.file_utils import atomic_write
+from utils.file_utils import atomic_write
 
 class ConfigManager:
     """Helper to manage config/.env file"""
