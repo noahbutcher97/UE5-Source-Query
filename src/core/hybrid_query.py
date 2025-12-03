@@ -275,6 +275,71 @@ class HybridQueryEngine:
 
         return hits
 
+    def query_relationships(self, entity_name: str, depth: int = 2) -> Dict:
+        """
+        Query relationships for a given entity (Phase 5).
+
+        Args:
+            entity_name: Entity to query (e.g., "FHitResult", "AActor")
+            depth: Relationship traversal depth (1-5) - reserved for future use
+
+        Returns:
+            Dict with relationship graph and formatted output
+        """
+        from core.relationship_extractor import RelationshipExtractor
+
+        # Use the existing definition extractor (already initialized with file paths)
+        definition_results = None
+
+        # Try struct first (most common for data types like FHitResult)
+        definition_results = self.definition_extractor.extract_struct(entity_name, fuzzy=True)
+
+        # Try class if no struct found
+        if not definition_results:
+            definition_results = self.definition_extractor.extract_class(entity_name, fuzzy=True)
+
+        # Try enum if still not found
+        if not definition_results:
+            definition_results = self.definition_extractor.extract_enum(entity_name, fuzzy=True)
+
+        if not definition_results:
+            return {
+                "error": f"Entity '{entity_name}' not found",
+                "entity": entity_name,
+                "depth": depth
+            }
+
+        # Use first result
+        def_result = definition_results[0]
+
+        # Extract relationships
+        rel_extractor = RelationshipExtractor(self.tool_root)
+        graph = rel_extractor.build_relationship_graph(
+            entity_name=def_result.entity_name,
+            definition=def_result.definition,
+            file_path=def_result.file_path
+        )
+
+        # Format as tree
+        tree = rel_extractor.format_relationship_tree(
+            entity_name=def_result.entity_name,
+            graph=graph,
+            depth=depth
+        )
+
+        # Format as JSON
+        json_graph = rel_extractor.format_relationship_json(graph)
+
+        return {
+            "entity": def_result.entity_name,
+            "entity_type": def_result.entity_type,
+            "graph": json_graph,
+            "tree": tree,
+            "depth": depth,
+            "file_path": def_result.file_path,
+            "line_range": f"{def_result.line_start}-{def_result.line_end}"
+        }
+
     def _format_def_result(self, result: DefinitionResult) -> Dict[str, Any]:
         """Format definition result for output"""
         return {

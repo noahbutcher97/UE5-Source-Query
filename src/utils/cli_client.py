@@ -52,6 +52,12 @@ def main():
     parser.add_argument("--filter", type=str, default=None,
                        help="Filter results (e.g., 'type:struct AND macro:UPROPERTY')")
 
+    # Relationship extraction (NEW - Phase 5)
+    parser.add_argument("--relationships", action="store_true",
+                       help="Extract and display code relationships (inheritance, composition)")
+    parser.add_argument("--depth", type=int, default=2,
+                       help="Relationship traversal depth (1-5, default: 2)")
+
     # Legacy option (deprecated but maintained for backwards compatibility)
     parser.add_argument("--json", action="store_true", help="Output raw JSON (deprecated, use --format json)")
 
@@ -90,6 +96,39 @@ def main():
         sys.exit(1)
 
     question = " ".join(args.question)
+
+    # Handle relationships mode (Phase 5)
+    if args.relationships:
+        from core.relationship_extractor import extract_entity_name
+        from core.hybrid_query import HybridQueryEngine
+
+        # Extract entity name from question
+        entity_name = extract_entity_name(question)
+
+        if not entity_name:
+            print(f"[ERROR] Could not detect entity name in: '{question}'", file=sys.stderr)
+            print("[HINT] Try format like: 'FHitResult' or 'AActor relationships'", file=sys.stderr)
+            sys.exit(1)
+
+        # Initialize engine and query relationships
+        engine = HybridQueryEngine(TOOL_ROOT)
+        results = engine.query_relationships(entity_name, depth=args.depth)
+
+        # Check for error
+        if "error" in results:
+            print(f"[ERROR] {results['error']}", file=sys.stderr)
+            sys.exit(1)
+
+        # Format output
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2))
+        else:
+            # Text/tree output
+            print(f"\n{results['tree']}\n")
+            print(f"File: {results['file_path']} (lines {results['line_range']})")
+
+        return
 
     # 1. Try Server
     results = None
