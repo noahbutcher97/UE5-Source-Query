@@ -72,7 +72,12 @@ EMBED_BATCH = int(os.getenv("EMBED_BATCH_SIZE", "16"))
 # Import semantic chunker if enabled
 if USE_SEMANTIC_CHUNKING:
     try:
-        from utils.semantic_chunker import SemanticChunker
+        # Universal import for both dev and deployed environments
+        try:
+            from src.utils.semantic_chunker import SemanticChunker
+        except ImportError:
+            from utils.semantic_chunker import SemanticChunker
+
         SEMANTIC_CHUNKER = SemanticChunker(
             max_chunk_size=CHUNK_SIZE,
             min_chunk_size=500,

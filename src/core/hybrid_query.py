@@ -14,7 +14,12 @@ from core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
 from core.definition_extractor import DefinitionExtractor, DefinitionResult
 from core.filtered_search import FilteredSearch
 from core import query_engine
-from utils.config_manager import ConfigManager # For getting model name
+
+# Universal import that works in both dev and deployed environments
+try:
+    from src.utils.config_manager import ConfigManager
+except ImportError:
+    from utils.config_manager import ConfigManager
 
 class HybridQueryEngine:
     """

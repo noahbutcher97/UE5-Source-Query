@@ -15,12 +15,21 @@ import json
 SCRIPT_DIR = Path(__file__).parent.parent.parent
 sys.path.append(str(SCRIPT_DIR))
 
-from src.utils.gui_theme import Theme
-from src.utils.config_manager import ConfigManager
-from src.utils.source_manager import SourceManager
-from src.utils.engine_helper import get_available_engines, resolve_uproject_source
-from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
-from src.core.hybrid_query import HybridQueryEngine
+# Universal imports that work in both dev and deployed environments
+try:
+    from src.utils.gui_theme import Theme
+    from src.utils.config_manager import ConfigManager
+    from src.utils.source_manager import SourceManager
+    from src.utils.engine_helper import get_available_engines, resolve_uproject_source
+    from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from src.core.hybrid_query import HybridQueryEngine
+except ImportError:
+    from utils.gui_theme import Theme
+    from utils.config_manager import ConfigManager
+    from utils.source_manager import SourceManager
+    from utils.engine_helper import get_available_engines, resolve_uproject_source
+    from utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from core.hybrid_query import HybridQueryEngine
 
 class UnifiedDashboard:
     def __init__(self, root):
@@ -162,17 +171,17 @@ class UnifiedDashboard:
         filter_row1 = ttk.Frame(filters_frame)
         filter_row1.pack(fill=tk.X, pady=(0, 5))
 
-        ttk.Label(filter_row1, text="Entity Type:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(filter_row1, text="Entity Type:", font=Theme.FONT_NORMAL).pack(side=tk.LEFT, padx=(0, 5))
         entity_types = ["", "struct", "class", "enum", "function", "delegate"]
         entity_combo = ttk.Combobox(filter_row1, textvariable=self.filter_entity_type_var, values=entity_types, state="readonly", width=12)
         entity_combo.pack(side=tk.LEFT, padx=(0, 15))
 
-        ttk.Label(filter_row1, text="UE5 Macro:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(filter_row1, text="UE5 Macro:", font=Theme.FONT_NORMAL).pack(side=tk.LEFT, padx=(0, 5))
         macros = ["", "UPROPERTY", "UCLASS", "UFUNCTION", "USTRUCT"]
         macro_combo = ttk.Combobox(filter_row1, textvariable=self.filter_macro_var, values=macros, state="readonly", width=12)
         macro_combo.pack(side=tk.LEFT, padx=(0, 15))
 
-        ttk.Label(filter_row1, text="File Type:", font=Theme.FONT).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(filter_row1, text="File Type:", font=Theme.FONT_NORMAL).pack(side=tk.LEFT, padx=(0, 5))
         file_types = ["", "header", "implementation"]
         file_combo = ttk.Combobox(filter_row1, textvariable=self.filter_file_type_var, values=file_types, state="readonly", width=15)
         file_combo.pack(side=tk.LEFT)
@@ -726,24 +735,41 @@ class UnifiedDashboard:
     def auto_detect_path(self):
         self.log_config("Detecting UE5 installations...", clear=True)
         self.engine_path_entry.config(state=tk.DISABLED) # Disable input while detecting
-        
+
         def detect():
             try:
-                installations = get_available_engines(self.script_dir)
+                # Use Phase 6 detection with validation and health scores
+                installations = get_available_engines(self.script_dir, use_cache=True)
 
                 if not installations:
                     self.root.after(0, lambda: self.log_config("! No UE5 installation detected", append=True))
-                    self.root.after(0, lambda: messagebox.showwarning(
-                        "Not Found",
-                        "Could not auto-detect UE5. Please browse manually."
-                    ))
+                    self.root.after(0, lambda: self.show_detection_help_dialog())
                     return
 
+                # Sort by health score (should already be sorted, but ensure)
+                installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
+
+                # Log all found installations with health info
+                for inst in installations:
+                    health_pct = int(inst.get('health_score', 0) * 100)
+                    source = inst.get('source', 'unknown')
+                    self.root.after(0, lambda v=inst['version'], s=source, h=health_pct:
+                        self.log_config(f"  Found {v} ({s}) - Health: {h}%", append=True))
+
                 if len(installations) == 1:
-                    path = installations[0]['engine_root']
-                    version = installations[0]['version']
+                    install = installations[0]
+                    path = install['engine_root']
+                    version = install['version']
+                    health = int(install.get('health_score', 0) * 100)
+
+                    # Warn if health is low
+                    if health < 70:
+                        warnings = install.get('warnings', [])
+                        warn_msg = "\n".join(warnings) if warnings else "Installation may be incomplete"
+                        self.root.after(0, lambda w=warn_msg: self.log_config(f"⚠ Warning: {w}", append=True))
+
                     self.root.after(0, lambda: self.engine_path_var.set(path))
-                    self.root.after(0, lambda: self.log_config(f"✓ Detected {version}: {path}", append=True))
+                    self.root.after(0, lambda: self.log_config(f"✓ Selected {version} (health: {health}%)", append=True))
                 else:
                     self.root.after(0, lambda: self.show_selection_dialog(installations))
 
@@ -756,43 +782,168 @@ class UnifiedDashboard:
 
         threading.Thread(target=detect, daemon=True).start()
 
-    def show_selection_dialog(self, installations):
+    def show_detection_help_dialog(self):
+        """Phase 6: Guide user through manual setup when detection fails"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Select UE5 Version")
-        dialog.geometry("500x300")
+        dialog.title("UE5 Engine Not Found - Setup Help")
+        dialog.geometry("700x500")
         dialog.transient(self.root)
         dialog.grab_set()
 
         self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        ttk.Label(dialog, text="Multiple UE5 versions found.\nPlease select one:", font=Theme.FONT_BOLD).pack(pady=10)
+        # Title
+        title_frame = ttk.Frame(dialog)
+        title_frame.pack(fill=tk.X, padx=20, pady=10)
+        ttk.Label(title_frame, text="No UE5 installation detected automatically",
+                  font=Theme.FONT_BOLD).pack()
 
+        # Help text with scrollbar
+        text_frame = ttk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        help_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
+                            font=Theme.FONT_NORMAL, relief=tk.FLAT, bg="#f0f0f0")
+        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=help_text.yview)
+
+        help_content = """To help us find your UE5 engine installation, try one of these methods:
+
+1. SET ENVIRONMENT VARIABLE (Recommended)
+
+   Set one of these environment variables:
+   • UE5_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
+   • UE_ROOT = C:\\Path\\To\\UE_5.3\\Engine
+   • UNREAL_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
+
+   Then restart this application.
+
+2. CREATE .ue5query CONFIG FILE
+
+   Create a file named .ue5query in your project root or home directory:
+
+   {
+     "engine": {
+       "path": "C:/Path/To/UE_5.3/Engine",
+       "version": "5.3.2"
+     }
+   }
+
+3. INSTALL IN STANDARD LOCATION
+
+   Ensure UE5 is installed in one of these standard locations:
+   • C:\\Program Files\\Epic Games\\UE_5.X
+   • D:\\Program Files\\Epic Games\\UE_5.X
+   • C:\\Epic Games\\UE_5.X
+   • D:\\Epic Games\\UE_5.X
+
+4. USE EPIC GAMES LAUNCHER
+
+   Install UE5 via Epic Games Launcher. It will be automatically
+   registered in Windows Registry for detection.
+
+5. BROWSE MANUALLY (Below)
+
+   Click 'Browse Manually' to select your engine directory directly.
+"""
+
+        help_text.insert("1.0", help_content)
+        help_text.config(state=tk.DISABLED)
+
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Button(button_frame, text="Browse Manually",
+                   command=lambda: [dialog.destroy(), self.browse_engine_path()],
+                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="Close",
+                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def show_selection_dialog(self, installations):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Select UE5 Version")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self.root.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 600) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 400) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Multiple UE5 versions found. Please select one:",
+                  font=Theme.FONT_BOLD).pack(pady=10)
+
+        # Create frame with scrollbar for installations
         frame = ttk.Frame(dialog)
         frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
 
         scrollbar = ttk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=Theme.FONT_NORMAL)
+        # Use Listbox with detailed info
+        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=Theme.FONT_NORMAL,
+                             selectmode=tk.SINGLE)
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=listbox.yview)
 
+        # Add installations with health scores
         for install in installations:
-            listbox.insert(tk.END, f"{install['version']} - {install['engine_root']}")
+            version = install['version']
+            source = install.get('source', 'unknown')
+            health = int(install.get('health_score', 0) * 100)
+            path = install['engine_root']
+
+            display = f"{version} | Health: {health}% | Source: {source}"
+            listbox.insert(tk.END, display)
+
+        # Info label for selected installation
+        info_label = ttk.Label(dialog, text="", font=Theme.FONT_SMALL, foreground="gray")
+        info_label.pack(pady=5)
+
+        def on_listbox_select(event):
+            selection = listbox.curselection()
+            if selection:
+                index = selection[0]
+                selected = installations[index]
+                info_label.config(text=f"Path: {selected['engine_root']}")
+
+        listbox.bind('<<ListboxSelect>>', on_listbox_select)
 
         def on_select():
             selection = listbox.curselection()
             if selection:
                 index = selection[0]
                 selected = installations[index]
+                health = int(selected.get('health_score', 0) * 100)
                 self.engine_path_var.set(selected['engine_root'])
-                self.log_config(f"✓ Selected {selected['version']}: {selected['engine_root']}", append=True)
-                dialog.destroy()
+                self.log_config(f"✓ Selected {selected['version']} (health: {health}%)", append=True)
 
-        ttk.Button(dialog, text="Select", command=on_select, style="Accent.TButton").pack(pady=15)
+                # Show warnings if any
+                warnings = selected.get('warnings', [])
+                if warnings:
+                    for warning in warnings:
+                        self.log_config(f"⚠ {warning}", append=True)
+
+                dialog.destroy()
+            else:
+                messagebox.showwarning("No Selection", "Please select an installation")
+
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=15)
+
+        ttk.Button(button_frame, text="Select", command=on_select,
+                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
         
     def toggle_api_visibility(self):
         if self.api_key_entry['show'] == '*':

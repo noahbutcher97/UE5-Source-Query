@@ -100,7 +100,7 @@ def main():
     # Handle relationships mode (Phase 5)
     if args.relationships:
         from core.relationship_extractor import extract_entity_name
-        from core.hybrid_query import HybridQueryEngine
+        # Note: HybridQueryEngine already imported at module level
 
         # Extract entity name from question
         entity_name = extract_entity_name(question)

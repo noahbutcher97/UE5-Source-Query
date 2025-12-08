@@ -1,5 +1,10 @@
 from pathlib import Path
-from utils.file_utils import atomic_write
+
+# Universal import that works in both dev and deployed environments
+try:
+    from src.utils.file_utils import atomic_write
+except ImportError:
+    from utils.file_utils import atomic_write
 
 class SourceManager:
     """Helper to manage EngineDirs.txt and ProjectDirs.txt"""
