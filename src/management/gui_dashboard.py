@@ -376,28 +376,38 @@ class UnifiedDashboard:
         )
         dev_value.pack(side=tk.LEFT)
 
-        # Deployment timestamp
-        if self.deployment_detector.env_info.deployed_at:
-            time_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
-            time_frame.pack(fill=tk.X, pady=5)
+        # Deployment timestamp (from config file)
+        try:
+            config_file = self.deployment_detector.root / ".ue5query_deploy.json"
+            if config_file.exists():
+                import json
+                with open(config_file) as f:
+                    config = json.load(f)
+                    deployed_at = config.get("deployment_info", {}).get("deployed_at")
 
-            time_label = tk.Label(
-                time_frame,
-                text="Deployed At:",
-                font=("Arial", 10, "bold"),
-                bg=Theme.BG_LIGHT,
-                fg=Theme.TEXT_DARK
-            )
-            time_label.pack(side=tk.LEFT, padx=(0, 10))
+                    if deployed_at:
+                        time_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
+                        time_frame.pack(fill=tk.X, pady=5)
 
-            time_value = tk.Label(
-                time_frame,
-                text=self.deployment_detector.env_info.deployed_at,
-                font=("Arial", 9),
-                bg=Theme.BG_LIGHT,
-                fg="#7F8C8D"
-            )
-            time_value.pack(side=tk.LEFT)
+                        time_label = tk.Label(
+                            time_frame,
+                            text="Deployed At:",
+                            font=("Arial", 10, "bold"),
+                            bg=Theme.BG_LIGHT,
+                            fg=Theme.TEXT_DARK
+                        )
+                        time_label.pack(side=tk.LEFT, padx=(0, 10))
+
+                        time_value = tk.Label(
+                            time_frame,
+                            text=deployed_at,
+                            font=("Arial", 9),
+                            bg=Theme.BG_LIGHT,
+                            fg="#7F8C8D"
+                        )
+                        time_value.pack(side=tk.LEFT)
+        except Exception:
+            pass  # Silently skip if config not available
 
     def _build_dev_repo_status(self, parent_frame):
         """Build status section for dev repo environments"""
