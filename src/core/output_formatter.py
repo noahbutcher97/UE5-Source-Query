@@ -80,20 +80,22 @@ class OutputFormatter:
 
         # Add definition results
         for def_result in results.get("definition_results", []):
+            # def_result is already a dict from hybrid_query._format_def_result
             item = {
                 "type": "definition",
-                "entity_type": def_result.entity_type,
-                "entity_name": def_result.entity_name,
-                "file_path": def_result.file_path,
-                "line_start": def_result.line_start,
-                "line_end": def_result.line_end,
-                "match_quality": def_result.match_quality,
-                "members_count": len(def_result.members)
+                "entity_type": def_result.get("entity_type", ""),
+                "entity_name": def_result.get("entity_name", ""),
+                "file_path": def_result.get("file_path", ""),
+                "line_start": def_result.get("line_start", 0),
+                "line_end": def_result.get("line_end", 0),
+                "match_quality": def_result.get("match_quality", ""),
+                "members_count": def_result.get("total_members", 0),
+                "origin": def_result.get("origin", "engine")
             }
 
             if include_code:
-                item["definition"] = def_result.definition
-                item["members"] = def_result.members
+                item["definition"] = def_result.get("definition", "")
+                item["members"] = def_result.get("members", [])
 
             output["results"]["definitions"].append(item)
 
@@ -264,10 +266,12 @@ class OutputFormatter:
                 if include_code:
                     lines.append("")
                     lines.append("```cpp")
-                    code_lines = def_result.definition.split('\n')[:max_lines]
+                    all_code_lines = def_result.definition.split('\n')
+                    code_lines = all_code_lines[:max_lines]
                     lines.extend(code_lines)
-                    if len(def_result.definition.split('\n')) > max_lines:
-                        lines.append(f"... ({len(def_result.definition.split('\n')) - max_lines} more lines)")
+                    if len(all_code_lines) > max_lines:
+                        remaining_lines = len(all_code_lines) - max_lines
+                        lines.append(f"... ({remaining_lines} more lines)")
                     lines.append("```")
 
                 lines.append("")
