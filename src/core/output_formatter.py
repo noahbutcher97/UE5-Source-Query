@@ -1,3 +1,4 @@
+
 # python
 # ===== File: output_formatter.py =====
 """
@@ -254,19 +255,29 @@ class OutputFormatter:
             lines.append("")
 
             for i, def_result in enumerate(def_results, 1):
-                lines.append(f"### {i}. {def_result.entity_type} `{def_result.entity_name}`")
-                lines.append(f"**File:** `{def_result.file_path}:{def_result.line_start}-{def_result.line_end}`")
-                lines.append(f"**Match Quality:** {def_result.match_quality:.2f}")
+                # def_result is already a dict from hybrid_query._format_def_result
+                entity_type = def_result.get("entity_type", "")
+                entity_name = def_result.get("entity_name", "")
+                file_path = def_result.get("file_path", "")
+                line_start = def_result.get("line_start", 0)
+                line_end = def_result.get("line_end", 0)
+                match_quality = def_result.get("match_quality", 0.0)
+                members = def_result.get("members", [])
+                definition = def_result.get("definition", "")
 
-                if def_result.members:
-                    lines.append(f"**Members ({len(def_result.members)}):** {', '.join(def_result.members[:5])}")
-                    if len(def_result.members) > 5:
-                        lines.append(f"... and {len(def_result.members) - 5} more")
+                lines.append(f"### {i}. {entity_type} `{entity_name}`")
+                lines.append(f"**File:** `{file_path}:{line_start}-{line_end}`")
+                lines.append(f"**Match Quality:** {match_quality:.2f}")
 
-                if include_code:
+                if members:
+                    lines.append(f"**Members ({len(members)}):** {', '.join(members[:5])}")
+                    if len(members) > 5:
+                        lines.append(f"... and {len(members) - 5} more")
+
+                if include_code and definition:
                     lines.append("")
                     lines.append("```cpp")
-                    all_code_lines = def_result.definition.split('\n')
+                    all_code_lines = definition.split('\n')
                     code_lines = all_code_lines[:max_lines]
                     lines.extend(code_lines)
                     if len(all_code_lines) > max_lines:
