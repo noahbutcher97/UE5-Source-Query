@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "deployment_info": {
+    "deployed_at": "2025-12-08T17:00:00Z",
+    "deployed_from": "D:\\DevTools\\UE5-Source-Query",
+    "deployment_method": "gui_installer",
+    "deployed_to": "D:\\UnrealProjects\\5.3\\hijack_prototype\\Scripts",
+    "last_updated": null,
+    "update_source": null,
+    "updated_from": null
+  },
+  "update_sources": {
+    "local_dev_repo": "D:\\DevTools\\UE5-Source-Query",
+    "remote_repo": "https://github.com/yourusername/UE5-Source-Query.git",
+    "branch": "master"
+  },
+  "update_strategy": "auto",
+  "exclude_patterns": [
+    ".venv/",
+    "data/vector_store.npz",
+    "data/vector_meta*.json",
+    ".git/",
+    "__pycache__/",
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".pytest_cache",
+    ".coverage",
+    "*.log"
+  ],
+  "preserve_local": [
+    "config/user_config.json",
+    ".env",
+    "data/vector_store.npz",
+    "data/vector_meta.json",
+    "data/vector_meta_enriched.json",
+    "data/vector_cache.json"
+  ]
+}
