@@ -61,10 +61,15 @@ class OutputFormatter:
     @staticmethod
     def _to_json(results: Dict[str, Any], include_code: bool) -> str:
         """Format as structured JSON"""
+        # Safely extract intent with defaults
+        intent = results.get("intent", {})
+        if not isinstance(intent, dict):
+            intent = {}
+
         output = {
             "query": {
-                "question": results.get("question", ""),
-                "intent": results.get("intent", {}),
+                "question": str(results.get("question", "")),
+                "intent": intent,
             },
             "results": {
                 "definitions": [],
@@ -81,41 +86,57 @@ class OutputFormatter:
 
         # Add definition results
         for def_result in results.get("definition_results", []):
-            # def_result is already a dict from hybrid_query._format_def_result
+            if not isinstance(def_result, dict):
+                continue  # Skip malformed results
+
+            # Extract match_quality safely - it might be string or float
+            match_quality = def_result.get("match_quality", 0.0)
+            if isinstance(match_quality, str):
+                try:
+                    match_quality = float(match_quality)
+                except (ValueError, TypeError):
+                    match_quality = 0.0
+
             item = {
                 "type": "definition",
-                "entity_type": def_result.get("entity_type", ""),
-                "entity_name": def_result.get("entity_name", ""),
-                "file_path": def_result.get("file_path", ""),
-                "line_start": def_result.get("line_start", 0),
-                "line_end": def_result.get("line_end", 0),
-                "match_quality": def_result.get("match_quality", ""),
-                "members_count": def_result.get("total_members", 0),
-                "origin": def_result.get("origin", "engine")
+                "entity_type": str(def_result.get("entity_type", "")),
+                "entity_name": str(def_result.get("entity_name", "")),
+                "file_path": str(def_result.get("file_path", "")),
+                "line_start": int(def_result.get("line_start", 0)),
+                "line_end": int(def_result.get("line_end", 0)),
+                "match_quality": float(match_quality),
+                "members_count": int(def_result.get("total_members", len(def_result.get("members", [])))),
+                "origin": str(def_result.get("origin", "engine"))
             }
 
             if include_code:
-                item["definition"] = def_result.get("definition", "")
-                item["members"] = def_result.get("members", [])
+                item["definition"] = str(def_result.get("definition", ""))
+                members = def_result.get("members", [])
+                item["members"] = [str(m) for m in members] if isinstance(members, list) else []
 
             output["results"]["definitions"].append(item)
 
         # Add semantic results
         for sem_result in results.get("semantic_results", []):
+            if not isinstance(sem_result, dict):
+                continue  # Skip malformed results
+
             item = {
                 "type": "semantic",
-                "path": sem_result.get("path", ""),
-                "chunk_index": sem_result.get("chunk_index", 0),
-                "total_chunks": sem_result.get("total_chunks", 1),
-                "score": sem_result.get("score", 0.0),
-                "origin": sem_result.get("origin", "engine")
+                "path": str(sem_result.get("path", "")),
+                "chunk_index": int(sem_result.get("chunk_index", 0)),
+                "total_chunks": int(sem_result.get("total_chunks", 1)),
+                "score": float(sem_result.get("score", 0.0)),
+                "origin": str(sem_result.get("origin", "engine"))
             }
 
             # Add enriched metadata if available
-            if "entities" in sem_result:
-                item["entities"] = sem_result["entities"]
-            if "entity_type" in sem_result:
-                item["entity_type"] = sem_result["entity_type"]
+            if "entities" in sem_result and sem_result["entities"]:
+                entities = sem_result["entities"]
+                item["entities"] = [str(e) for e in entities] if isinstance(entities, list) else []
+
+            if "entity_type" in sem_result and sem_result["entity_type"]:
+                item["entity_type"] = str(sem_result["entity_type"])
 
             output["results"]["semantic"].append(item)
 
@@ -134,21 +155,22 @@ class OutputFormatter:
             "timestamp": results.get("timing", {})
         }))
 
-        # Definition results
+        # Definition results - def_result is already a dict
         for def_result in results.get("definition_results", []):
             item = {
                 "type": "definition",
-                "entity_type": def_result.entity_type,
-                "entity_name": def_result.entity_name,
-                "file_path": def_result.file_path,
-                "line_start": def_result.line_start,
-                "line_end": def_result.line_end,
-                "match_quality": def_result.match_quality
+                "entity_type": def_result.get("entity_type", ""),
+                "entity_name": def_result.get("entity_name", ""),
+                "file_path": def_result.get("file_path", ""),
+                "line_start": def_result.get("line_start", 0),
+                "line_end": def_result.get("line_end", 0),
+                "match_quality": def_result.get("match_quality", 0.0),
+                "origin": def_result.get("origin", "engine")
             }
 
             if include_code:
-                item["definition"] = def_result.definition
-                item["members"] = def_result.members
+                item["definition"] = def_result.get("definition", "")
+                item["members"] = def_result.get("members", [])
 
             lines.append(json.dumps(item))
 
@@ -162,7 +184,7 @@ class OutputFormatter:
                 "origin": sem_result.get("origin", "engine")
             }
 
-            if "entities" in sem_result:
+            if "entities" in sem_result and sem_result["entities"]:
                 item["entities"] = sem_result["entities"]
 
             lines.append(json.dumps(item))
@@ -182,52 +204,85 @@ class OutputFormatter:
 
         # Query element
         query_elem = ET.SubElement(root, "query")
-        ET.SubElement(query_elem, "question").text = results.get("question", "")
+        question_elem = ET.SubElement(query_elem, "question")
+        question_elem.text = results.get("question", "")
 
         intent = results.get("intent", {})
         intent_elem = ET.SubElement(query_elem, "intent")
         for key, value in intent.items():
-            ET.SubElement(intent_elem, key).text = str(value)
+            elem = ET.SubElement(intent_elem, key)
+            elem.text = str(value) if value is not None else ""
 
         # Results element
         results_elem = ET.SubElement(root, "results")
 
-        # Definitions
+        # Definitions - def_result is already a dict
         defs_elem = ET.SubElement(results_elem, "definitions")
         for def_result in results.get("definition_results", []):
             def_elem = ET.SubElement(defs_elem, "definition")
-            ET.SubElement(def_elem, "entity_type").text = def_result.entity_type
-            ET.SubElement(def_elem, "entity_name").text = def_result.entity_name
-            ET.SubElement(def_elem, "file_path").text = def_result.file_path
-            ET.SubElement(def_elem, "line_start").text = str(def_result.line_start)
-            ET.SubElement(def_elem, "line_end").text = str(def_result.line_end)
-            ET.SubElement(def_elem, "match_quality").text = f"{def_result.match_quality:.2f}"
+
+            entity_type_elem = ET.SubElement(def_elem, "entity_type")
+            entity_type_elem.text = def_result.get("entity_type", "")
+
+            entity_name_elem = ET.SubElement(def_elem, "entity_name")
+            entity_name_elem.text = def_result.get("entity_name", "")
+
+            file_path_elem = ET.SubElement(def_elem, "file_path")
+            file_path_elem.text = def_result.get("file_path", "")
+
+            line_start_elem = ET.SubElement(def_elem, "line_start")
+            line_start_elem.text = str(def_result.get("line_start", 0))
+
+            line_end_elem = ET.SubElement(def_elem, "line_end")
+            line_end_elem.text = str(def_result.get("line_end", 0))
+
+            match_quality = def_result.get("match_quality", 0.0)
+            if isinstance(match_quality, (int, float)):
+                match_quality_elem = ET.SubElement(def_elem, "match_quality")
+                match_quality_elem.text = f"{match_quality:.2f}"
+
+            origin_elem = ET.SubElement(def_elem, "origin")
+            origin_elem.text = def_result.get("origin", "engine")
 
             if include_code:
-                code_elem = ET.SubElement(def_elem, "definition")
-                code_elem.text = def_result.definition
+                definition = def_result.get("definition", "")
+                if definition:
+                    code_elem = ET.SubElement(def_elem, "definition")
+                    code_elem.text = definition
 
-                members_elem = ET.SubElement(def_elem, "members")
-                for member in def_result.members[:10]:  # Limit to avoid huge XML
-                    ET.SubElement(members_elem, "member").text = member
+                members = def_result.get("members", [])
+                if members:
+                    members_elem = ET.SubElement(def_elem, "members")
+                    for member in members[:10]:  # Limit to avoid huge XML
+                        member_elem = ET.SubElement(members_elem, "member")
+                        member_elem.text = str(member)
 
         # Semantic results
         sem_elem = ET.SubElement(results_elem, "semantic")
         for sem_result in results.get("semantic_results", []):
             result_elem = ET.SubElement(sem_elem, "result")
-            ET.SubElement(result_elem, "path").text = sem_result.get("path", "")
-            ET.SubElement(result_elem, "score").text = f"{sem_result.get('score', 0.0):.3f}"
-            ET.SubElement(result_elem, "origin").text = sem_result.get("origin", "engine")
 
-            if "entities" in sem_result:
+            path_elem = ET.SubElement(result_elem, "path")
+            path_elem.text = sem_result.get("path", "")
+
+            score_elem = ET.SubElement(result_elem, "score")
+            score_elem.text = f"{sem_result.get('score', 0.0):.3f}"
+
+            origin_elem = ET.SubElement(result_elem, "origin")
+            origin_elem.text = sem_result.get("origin", "engine")
+
+            if "entities" in sem_result and sem_result["entities"]:
                 entities_elem = ET.SubElement(result_elem, "entities")
                 for entity in sem_result["entities"]:
-                    ET.SubElement(entities_elem, "entity").text = entity
+                    entity_elem = ET.SubElement(entities_elem, "entity")
+                    entity_elem.text = str(entity) if entity is not None else ""
 
         # Timing
         timing_elem = ET.SubElement(root, "timing")
         for key, value in results.get("timing", {}).items():
-            ET.SubElement(timing_elem, key).text = f"{value:.3f}"
+            if isinstance(value, (int, float)):
+                time_elem = ET.SubElement(timing_elem, key)
+                time_elem.text = f"{value:.3f}"
 
         return ET.tostring(root, encoding='unicode', method='xml')
 
@@ -255,22 +310,37 @@ class OutputFormatter:
             lines.append("")
 
             for i, def_result in enumerate(def_results, 1):
+                if not isinstance(def_result, dict):
+                    continue  # Skip malformed results
+
                 # def_result is already a dict from hybrid_query._format_def_result
-                entity_type = def_result.get("entity_type", "")
-                entity_name = def_result.get("entity_name", "")
-                file_path = def_result.get("file_path", "")
+                entity_type = str(def_result.get("entity_type", ""))
+                entity_name = str(def_result.get("entity_name", ""))
+                file_path = str(def_result.get("file_path", ""))
                 line_start = def_result.get("line_start", 0)
                 line_end = def_result.get("line_end", 0)
+
+                # Handle match_quality which might be string or float
                 match_quality = def_result.get("match_quality", 0.0)
+                if isinstance(match_quality, str):
+                    try:
+                        match_quality = float(match_quality)
+                    except (ValueError, TypeError):
+                        match_quality = 0.0
+
                 members = def_result.get("members", [])
-                definition = def_result.get("definition", "")
+                if not isinstance(members, list):
+                    members = []
+
+                definition = str(def_result.get("definition", ""))
 
                 lines.append(f"### {i}. {entity_type} `{entity_name}`")
                 lines.append(f"**File:** `{file_path}:{line_start}-{line_end}`")
                 lines.append(f"**Match Quality:** {match_quality:.2f}")
 
                 if members:
-                    lines.append(f"**Members ({len(members)}):** {', '.join(members[:5])}")
+                    member_strs = [str(m) for m in members[:5]]
+                    lines.append(f"**Members ({len(members)}):** {', '.join(member_strs)}")
                     if len(members) > 5:
                         lines.append(f"... and {len(members) - 5} more")
 
@@ -321,18 +391,32 @@ class OutputFormatter:
         """Extract just code snippets (useful for context building)"""
         snippets = []
 
-        # Definition code
+        # Definition code - def_result is already a dict
         for def_result in results.get("definition_results", []):
-            header = f"// {def_result.entity_type} {def_result.entity_name}"
-            location = f"// File: {def_result.file_path}:{def_result.line_start}"
+            entity_type = def_result.get("entity_type", "")
+            entity_name = def_result.get("entity_name", "")
+            file_path = def_result.get("file_path", "")
+            line_start = def_result.get("line_start", 0)
+            definition = def_result.get("definition", "")
 
-            code_lines = def_result.definition.split('\n')[:max_lines]
+            if not definition:
+                continue
+
+            header = f"// {entity_type} {entity_name}"
+            location = f"// File: {file_path}:{line_start}"
+
+            all_code_lines = definition.split('\n')
+            code_lines = all_code_lines[:max_lines]
             code = '\n'.join(code_lines)
+
+            if len(all_code_lines) > max_lines:
+                remaining = len(all_code_lines) - max_lines
+                code += f"\n// ... ({remaining} more lines)"
 
             snippet = f"{header}\n{location}\n{code}\n"
             snippets.append(snippet)
 
-        return "\n".join(snippets)
+        return "\n".join(snippets) if snippets else "// No code snippets available"
 
     @staticmethod
     def _to_text(results: Dict[str, Any]) -> str:
