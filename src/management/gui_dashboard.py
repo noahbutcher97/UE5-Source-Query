@@ -22,6 +22,7 @@ try:
     from src.utils.source_manager import SourceManager
     from src.utils.engine_helper import get_available_engines, resolve_uproject_source
     from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from src.utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from src.core.hybrid_query import HybridQueryEngine
 except ImportError:
     from utils.gui_theme import Theme
@@ -29,6 +30,7 @@ except ImportError:
     from utils.source_manager import SourceManager
     from utils.engine_helper import get_available_engines, resolve_uproject_source
     from utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from core.hybrid_query import HybridQueryEngine
 
 class UnifiedDashboard:
@@ -43,6 +45,9 @@ class UnifiedDashboard:
         self.script_dir = SCRIPT_DIR
         self.source_manager = SourceManager(self.script_dir)
         self.config_manager = ConfigManager(self.script_dir)
+
+        # Deployment detection
+        self.deployment_detector = DeploymentDetector(self.script_dir)
 
         # Configuration variables
         self.api_key_var = tk.StringVar(value=self.config_manager.get('ANTHROPIC_API_KEY', ''))
@@ -109,30 +114,438 @@ class UnifiedDashboard:
         self.notebook = ttk.Notebook(container)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
-        # 1. Query Tab (Main Interface)
+        # 1. System Status Tab (NEW - Environment & Update Info)
+        self.tab_status = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_status, text="System Status")
+        self.build_status_tab()
+
+        # 2. Query Tab (Main Interface)
         self.tab_query = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_query, text="Query")
         self.build_query_tab()
 
-        # 2. Configuration Tab
+        # 3. Configuration Tab
         self.tab_config = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_config, text="Configuration")
         self.build_config_tab()
 
-        # 3. Source Manager Tab
+        # 4. Source Manager Tab
         self.tab_sources = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_sources, text="Source Manager")
         self.build_sources_tab()
-        
-        # 4. Diagnostics Tab (Health Check)
+
+        # 5. Diagnostics Tab (Health Check)
         self.tab_diagnostics = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_diagnostics, text="Diagnostics")
         self.build_diagnostics_tab()
-        
-        # 5. Maintenance Tab
+
+        # 6. Maintenance Tab
         self.tab_maintenance = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_maintenance, text="Maintenance")
         self.build_maintenance_tab()
+
+    def build_status_tab(self):
+        """Build System Status tab showing environment type, deployment info, and update capabilities"""
+        frame = ttk.Frame(self.tab_status, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Environment Type Section
+        env_frame = ttk.LabelFrame(frame, text=" Environment Information ", padding=15)
+        env_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Environment type detection
+        env_type = self.deployment_detector.env_type
+        is_dev = self.deployment_detector.is_dev_repo()
+        is_deployed = self.deployment_detector.is_deployed()
+        is_valid = self.deployment_detector.env_info.is_valid
+
+        # Environment type display
+        env_type_frame = tk.Frame(env_frame, bg=Theme.BG_LIGHT)
+        env_type_frame.pack(fill=tk.X, pady=5)
+
+        env_type_label = tk.Label(
+            env_type_frame,
+            text="Environment Type:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        )
+        env_type_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Color-code based on environment
+        if is_dev:
+            env_color = "#4CAF50"  # Green for dev
+            env_display = "Development Repository"
+        elif is_deployed:
+            env_color = "#2196F3"  # Blue for deployed
+            env_display = "Deployed Installation"
+        else:
+            env_color = "#FF9800"  # Orange for unknown
+            env_display = "Unknown"
+
+        env_value = tk.Label(
+            env_type_frame,
+            text=env_display,
+            font=("Arial", 10),
+            bg=env_color,
+            fg="white",
+            padx=10,
+            pady=2
+        )
+        env_value.pack(side=tk.LEFT)
+
+        # Validity status
+        validity_label = tk.Label(
+            env_type_frame,
+            text=f"Valid: {'✓' if is_valid else '✗'}",
+            font=("Arial", 10),
+            bg=Theme.BG_LIGHT,
+            fg="#4CAF50" if is_valid else "#F44336"
+        )
+        validity_label.pack(side=tk.LEFT, padx=(20, 0))
+
+        # Root path
+        root_frame = tk.Frame(env_frame, bg=Theme.BG_LIGHT)
+        root_frame.pack(fill=tk.X, pady=5)
+
+        root_label = tk.Label(
+            root_frame,
+            text="Root Directory:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        )
+        root_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        root_value = tk.Label(
+            root_frame,
+            text=str(self.deployment_detector.root),
+            font=("Arial", 9),
+            bg=Theme.BG_LIGHT,
+            fg="#7F8C8D"
+        )
+        root_value.pack(side=tk.LEFT)
+
+        # Issues (if any)
+        if self.deployment_detector.env_info.issues:
+            issues_frame = tk.Frame(env_frame, bg=Theme.BG_LIGHT)
+            issues_frame.pack(fill=tk.X, pady=5)
+
+            issues_label = tk.Label(
+                issues_frame,
+                text="Issues:",
+                font=("Arial", 10, "bold"),
+                bg=Theme.BG_LIGHT,
+                fg="#F44336"
+            )
+            issues_label.pack(anchor=tk.W)
+
+            for issue in self.deployment_detector.env_info.issues:
+                issue_text = tk.Label(
+                    issues_frame,
+                    text=f"  • {issue}",
+                    font=("Arial", 9),
+                    bg=Theme.BG_LIGHT,
+                    fg="#F44336"
+                )
+                issue_text.pack(anchor=tk.W)
+
+        # Deployment/Dev Repo Connection Section
+        if is_deployed:
+            self._build_deployed_status(frame)
+        elif is_dev:
+            self._build_dev_repo_status(frame)
+
+        # Update Section
+        update_frame = ttk.LabelFrame(frame, text=" Update System ", padding=15)
+        update_frame.pack(fill=tk.X, pady=(0, 15))
+
+        can_update = self.deployment_detector.can_update()
+
+        if can_update:
+            update_source = self.deployment_detector.get_update_source()
+
+            # Update source display
+            source_frame = tk.Frame(update_frame, bg=Theme.BG_LIGHT)
+            source_frame.pack(fill=tk.X, pady=5)
+
+            source_label = tk.Label(
+                source_frame,
+                text="Update Source:",
+                font=("Arial", 10, "bold"),
+                bg=Theme.BG_LIGHT,
+                fg=Theme.TEXT_DARK
+            )
+            source_label.pack(side=tk.LEFT, padx=(0, 10))
+
+            source_color = "#4CAF50" if update_source == "local" else "#2196F3"
+            source_value = tk.Label(
+                source_frame,
+                text=f"{update_source.upper()}",
+                font=("Arial", 10),
+                bg=source_color,
+                fg="white",
+                padx=10,
+                pady=2
+            )
+            source_value.pack(side=tk.LEFT)
+
+            # Update buttons
+            btn_frame = tk.Frame(update_frame, bg=Theme.BG_LIGHT)
+            btn_frame.pack(fill=tk.X, pady=10)
+
+            update_btn = tk.Button(
+                btn_frame,
+                text="Update Now",
+                command=self.run_update,
+                bg=Theme.SECONDARY,
+                fg="white",
+                font=("Arial", 10, "bold"),
+                padx=20,
+                pady=8,
+                relief=tk.FLAT,
+                cursor="hand2"
+            )
+            update_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+            check_btn = tk.Button(
+                btn_frame,
+                text="Check for Updates (Dry Run)",
+                command=lambda: self.run_update(dry_run=True),
+                bg=Theme.BG_DARK,
+                fg="white",
+                font=("Arial", 10),
+                padx=15,
+                pady=8,
+                relief=tk.FLAT,
+                cursor="hand2"
+            )
+            check_btn.pack(side=tk.LEFT)
+        else:
+            no_update_label = tk.Label(
+                update_frame,
+                text="Updates not available for this installation",
+                font=("Arial", 10),
+                bg=Theme.BG_LIGHT,
+                fg="#7F8C8D"
+            )
+            no_update_label.pack(pady=10)
+
+        # Update log
+        log_frame = ttk.LabelFrame(frame, text=" Update Log ", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.status_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=10,
+            font=("Consolas", 9),
+            bg="#1E1E1E",
+            fg="#D4D4D4",
+            insertbackground="white"
+        )
+        self.status_log.pack(fill=tk.BOTH, expand=True)
+        self.status_log.insert("1.0", "System ready. Click 'Update Now' to update from source.\n")
+        self.status_log.config(state=tk.DISABLED)
+
+    def _build_deployed_status(self, parent_frame):
+        """Build status section for deployed environments"""
+        deploy_frame = ttk.LabelFrame(parent_frame, text=" Deployment Information ", padding=15)
+        deploy_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Dev repo path
+        dev_repo = self.deployment_detector.get_dev_repo_path()
+
+        dev_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
+        dev_frame.pack(fill=tk.X, pady=5)
+
+        dev_label = tk.Label(
+            dev_frame,
+            text="Source Dev Repo:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        )
+        dev_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        dev_value = tk.Label(
+            dev_frame,
+            text=str(dev_repo) if dev_repo else "Not connected",
+            font=("Arial", 9),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_LIGHT if dev_repo else "#F44336"
+        )
+        dev_value.pack(side=tk.LEFT)
+
+        # Deployment timestamp
+        if self.deployment_detector.env_info.deployed_at:
+            time_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
+            time_frame.pack(fill=tk.X, pady=5)
+
+            time_label = tk.Label(
+                time_frame,
+                text="Deployed At:",
+                font=("Arial", 10, "bold"),
+                bg=Theme.BG_LIGHT,
+                fg=Theme.TEXT_DARK
+            )
+            time_label.pack(side=tk.LEFT, padx=(0, 10))
+
+            time_value = tk.Label(
+                time_frame,
+                text=self.deployment_detector.env_info.deployed_at,
+                font=("Arial", 9),
+                bg=Theme.BG_LIGHT,
+                fg="#7F8C8D"
+            )
+            time_value.pack(side=tk.LEFT)
+
+    def _build_dev_repo_status(self, parent_frame):
+        """Build status section for dev repo environments"""
+        deploy_frame = ttk.LabelFrame(parent_frame, text=" Tracked Deployments ", padding=15)
+        deploy_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        deployments = self.deployment_detector.get_deployments()
+
+        if deployments:
+            # Header
+            header_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
+            header_frame.pack(fill=tk.X, pady=(0, 10))
+
+            count_label = tk.Label(
+                header_frame,
+                text=f"Found {len(deployments)} deployment(s):",
+                font=("Arial", 10, "bold"),
+                bg=Theme.BG_LIGHT,
+                fg=Theme.TEXT_DARK
+            )
+            count_label.pack(side=tk.LEFT)
+
+            # Deployments list
+            deploy_list_frame = tk.Frame(deploy_frame, bg="white", relief=tk.SUNKEN, bd=1)
+            deploy_list_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Create scrollable list
+            deploy_canvas = tk.Canvas(deploy_list_frame, bg="white", highlightthickness=0, height=150)
+            scrollbar = ttk.Scrollbar(deploy_list_frame, orient=tk.VERTICAL, command=deploy_canvas.yview)
+            deploy_content = tk.Frame(deploy_canvas, bg="white")
+
+            deploy_canvas.configure(yscrollcommand=scrollbar.set)
+
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            deploy_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            canvas_frame = deploy_canvas.create_window((0, 0), window=deploy_content, anchor=tk.NW)
+
+            # Add deployments
+            for deploy in deployments:
+                deploy_item = tk.Frame(deploy_content, bg="white", pady=5, padx=10)
+                deploy_item.pack(fill=tk.X)
+
+                # Status indicator
+                status_color = "#4CAF50" if deploy.is_valid else "#F44336"
+                status_indicator = tk.Label(
+                    deploy_item,
+                    text="●",
+                    font=("Arial", 12),
+                    bg="white",
+                    fg=status_color
+                )
+                status_indicator.pack(side=tk.LEFT, padx=(0, 10))
+
+                # Path
+                path_label = tk.Label(
+                    deploy_item,
+                    text=deploy.path,
+                    font=("Arial", 9),
+                    bg="white",
+                    fg=Theme.TEXT_DARK,
+                    anchor=tk.W
+                )
+                path_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                # Issues
+                if deploy.issues:
+                    issue_label = tk.Label(
+                        deploy_item,
+                        text=f"({', '.join(deploy.issues)})",
+                        font=("Arial", 8),
+                        bg="white",
+                        fg="#F44336"
+                    )
+                    issue_label.pack(side=tk.RIGHT)
+
+            # Update scroll region
+            deploy_content.update_idletasks()
+            deploy_canvas.configure(scrollregion=deploy_canvas.bbox("all"))
+
+            # Bind mousewheel
+            def _on_mousewheel(event):
+                deploy_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            deploy_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        else:
+            no_deploy_label = tk.Label(
+                deploy_frame,
+                text="No deployments found",
+                font=("Arial", 10),
+                bg=Theme.BG_LIGHT,
+                fg="#7F8C8D"
+            )
+            no_deploy_label.pack(pady=20)
+
+    def run_update(self, dry_run=False):
+        """Run update process in background thread"""
+        def update_thread():
+            try:
+                # Import here to avoid circular dependency
+                try:
+                    from tools.update import UpdateManager
+                except ImportError:
+                    import sys
+                    sys.path.insert(0, str(self.script_dir / "tools"))
+                    from update import UpdateManager
+
+                self.status_log.config(state=tk.NORMAL)
+                self.status_log.delete("1.0", tk.END)
+
+                if dry_run:
+                    self.status_log.insert(tk.END, "=== DRY RUN MODE ===\n")
+
+                manager = UpdateManager(self.script_dir)
+
+                # Load config
+                if not manager.load_config():
+                    self.status_log.insert(tk.END, "[ERROR] Failed to load deployment config\n")
+                    self.status_log.config(state=tk.DISABLED)
+                    return
+
+                # Detect source
+                source = manager.detect_update_source()
+                self.status_log.insert(tk.END, f"Update source: {source}\n\n")
+
+                # Run update
+                if source == "local":
+                    success = manager.update_from_local(dry_run=dry_run)
+                else:
+                    success = manager.update_from_remote(dry_run=dry_run)
+
+                if success:
+                    self.status_log.insert(tk.END, "\n[OK] Update completed successfully!\n")
+                    if not dry_run:
+                        messagebox.showinfo("Update Complete", "System updated successfully!")
+                else:
+                    self.status_log.insert(tk.END, "\n[ERROR] Update failed!\n")
+                    messagebox.showerror("Update Failed", "Update process failed. Check log for details.")
+
+            except Exception as e:
+                self.status_log.insert(tk.END, f"\n[ERROR] {str(e)}\n")
+                messagebox.showerror("Error", f"Update failed: {str(e)}")
+            finally:
+                self.status_log.config(state=tk.DISABLED)
+
+        # Start update in background
+        thread = threading.Thread(target=update_thread, daemon=True)
+        thread.start()
 
     def build_query_tab(self):
         frame = ttk.Frame(self.tab_query, padding=20)
@@ -502,27 +915,182 @@ class UnifiedDashboard:
             self.refresh_project_list()
 
     def build_diagnostics_tab(self):
+        """Build enhanced Diagnostics tab with comprehensive testing options"""
         frame = ttk.Frame(self.tab_diagnostics, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Action Bar
-        action_frame = ttk.Frame(frame)
-        action_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(action_frame, text="System Health Check", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
-        
-        btn_run = ttk.Button(action_frame, text="▶ Run Diagnostics", command=self.run_diagnostics, style="Accent.TButton")
-        btn_run.pack(side=tk.RIGHT)
-        
-        # Output Area
-        self.diag_log = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, state=tk.DISABLED)
-        self.diag_log.pack(fill=tk.BOTH, expand=True)
-        
-        # Initial instruction
-        self.log_diag("Ready to run diagnostics. Click 'Run Diagnostics' to begin.")
 
-    def run_diagnostics(self):
-        self.log_diag("Running health check...", clear=True)
+        # Test Options Section
+        options_frame = ttk.LabelFrame(frame, text=" Test Suite Options ", padding=15)
+        options_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Grid layout for test buttons
+        test_grid = tk.Frame(options_frame, bg=Theme.BG_LIGHT)
+        test_grid.pack(fill=tk.X)
+
+        # Row 1: Basic Health Checks
+        row1_label = tk.Label(
+            test_grid,
+            text="Basic Health:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK,
+            width=15,
+            anchor=tk.W
+        )
+        row1_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+
+        btn_health = tk.Button(
+            test_grid,
+            text="System Health",
+            command=self.run_health_check,
+            bg=Theme.SUCCESS,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_health.grid(row=0, column=1, padx=5, pady=5)
+
+        btn_vector = tk.Button(
+            test_grid,
+            text="Vector Store Validation",
+            command=self.run_vector_validation,
+            bg=Theme.SUCCESS,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_vector.grid(row=0, column=2, padx=5, pady=5)
+
+        # Row 2: Unit Tests
+        row2_label = tk.Label(
+            test_grid,
+            text="Unit Tests:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK,
+            width=15,
+            anchor=tk.W
+        )
+        row2_label.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+
+        btn_deployment = tk.Button(
+            test_grid,
+            text="Deployment Detection",
+            command=lambda: self.run_test_suite("deployment"),
+            bg=Theme.SECONDARY,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_deployment.grid(row=1, column=1, padx=5, pady=5)
+
+        btn_update = tk.Button(
+            test_grid,
+            text="Update Integration",
+            command=lambda: self.run_test_suite("update"),
+            bg=Theme.SECONDARY,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_update.grid(row=1, column=2, padx=5, pady=5)
+
+        # Row 3: Smoke Tests
+        row3_label = tk.Label(
+            test_grid,
+            text="Smoke Tests:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK,
+            width=15,
+            anchor=tk.W
+        )
+        row3_label.grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+
+        btn_gui_smoke = tk.Button(
+            test_grid,
+            text="GUI Launch",
+            command=self.run_gui_smoke_test,
+            bg=Theme.WARNING,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_gui_smoke.grid(row=2, column=1, padx=5, pady=5)
+
+        btn_import_smoke = tk.Button(
+            test_grid,
+            text="Module Imports",
+            command=self.run_import_smoke_test,
+            bg=Theme.WARNING,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_import_smoke.grid(row=2, column=2, padx=5, pady=5)
+
+        # Row 4: Full Test Suite
+        row4_label = tk.Label(
+            test_grid,
+            text="Full Suite:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK,
+            width=15,
+            anchor=tk.W
+        )
+        row4_label.grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+
+        btn_all_tests = tk.Button(
+            test_grid,
+            text="Run All Tests",
+            command=lambda: self.run_test_suite("all"),
+            bg=Theme.ERROR,
+            fg="white",
+            padx=15,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=("Arial", 10, "bold")
+        )
+        btn_all_tests.grid(row=3, column=1, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+
+        # Output Area
+        output_frame = ttk.LabelFrame(frame, text=" Test Output ", padding=10)
+        output_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.diag_log = scrolledtext.ScrolledText(
+            output_frame,
+            font=("Consolas", 9),
+            bg="#1E1E1E",
+            fg="#D4D4D4",
+            state=tk.DISABLED
+        )
+        self.diag_log.pack(fill=tk.BOTH, expand=True)
+
+        # Initial instruction
+        self.log_diag("Test suite ready. Select a test category to run.\n")
+        self.log_diag("\nTest Categories:\n")
+        self.log_diag("  • Basic Health - Quick system validation\n")
+        self.log_diag("  • Unit Tests - Component-level testing\n")
+        self.log_diag("  • Smoke Tests - Fast integration checks\n")
+        self.log_diag("  • Full Suite - Comprehensive testing (may take several minutes)\n")
+
+    def run_health_check(self):
+        """Run basic system health check"""
+        self.log_diag("Running system health check...", clear=True)
 
         def _run():
             # First, check GPU
@@ -583,6 +1151,159 @@ class UnifiedDashboard:
         self.diag_log.insert(tk.END, message + ("\n" if not message.endswith("\n") else ""))
         self.diag_log.see(tk.END)
         self.diag_log.config(state=tk.DISABLED)
+
+    def run_vector_validation(self):
+        """Run vector store validation"""
+        self.log_diag("Running vector store validation...", clear=True)
+
+        def _run():
+            script = self.script_dir / "src" / "utils" / "verify_vector_store.py"
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, str(script)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.script_dir)
+                )
+
+                for line in process.stdout:
+                    self.root.after(0, lambda l=line: self.log_diag(l.rstrip(), append=True))
+
+                process.wait()
+
+                if process.returncode == 0:
+                    self.root.after(0, lambda: self.log_diag("\n[SUCCESS] Vector store is valid", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag("\n[WARNING] Vector store issues detected", append=True))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_diag(f"\nError: {err}", append=True))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def run_test_suite(self, suite_name):
+        """Run specific test suite"""
+        self.log_diag(f"Running {suite_name} test suite...", clear=True)
+
+        def _run():
+            test_file_map = {
+                "deployment": "tests/test_deployment_detection.py",
+                "update": "tests/test_update_integration.py",
+                "all": "tests/run_tests.py"
+            }
+
+            test_file = self.script_dir / test_file_map.get(suite_name, "tests/run_tests.py")
+
+            if not test_file.exists():
+                self.root.after(0, lambda: self.log_diag(f"\n[ERROR] Test file not found: {test_file}", append=True))
+                return
+
+            try:
+                self.root.after(0, lambda: self.log_diag(f"Test file: {test_file}\n", append=True))
+
+                process = subprocess.Popen(
+                    [sys.executable, str(test_file)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.script_dir)
+                )
+
+                for line in process.stdout:
+                    self.root.after(0, lambda l=line: self.log_diag(l.rstrip(), append=True))
+
+                process.wait()
+
+                if process.returncode == 0:
+                    self.root.after(0, lambda: self.log_diag("\n[SUCCESS] All tests passed!", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag(f"\n[FAILED] Tests failed with exit code {process.returncode}", append=True))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_diag(f"\nError: {err}", append=True))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def run_gui_smoke_test(self):
+        """Run GUI smoke test"""
+        self.log_diag("Running GUI smoke test...", clear=True)
+
+        def _run():
+            test_file = self.script_dir / "tests" / "test_gui_smoke.py"
+
+            if not test_file.exists():
+                self.root.after(0, lambda: self.log_diag(f"\n[ERROR] Test file not found: {test_file}", append=True))
+                return
+
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, str(test_file)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.script_dir)
+                )
+
+                for line in process.stdout:
+                    self.root.after(0, lambda l=line: self.log_diag(l.rstrip(), append=True))
+
+                process.wait()
+
+                if process.returncode == 0:
+                    self.root.after(0, lambda: self.log_diag("\n[SUCCESS] GUI smoke test passed", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag(f"\n[FAILED] GUI smoke test failed", append=True))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_diag(f"\nError: {err}", append=True))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def run_import_smoke_test(self):
+        """Run import smoke test"""
+        self.log_diag("Running module import smoke test...", clear=True)
+
+        def _run():
+            self.root.after(0, lambda: self.log_diag("Testing core module imports...\n", append=True))
+
+            test_imports = [
+                ("Core Query Engine", "src.core.hybrid_query", "HybridQueryEngine"),
+                ("Definition Extractor", "src.core.definition_extractor", "DefinitionExtractor"),
+                ("Query Intent", "src.core.query_intent", "QueryIntentAnalyzer"),
+                ("Deployment Detector", "src.utils.deployment_detector", "DeploymentDetector"),
+                ("Source Manager", "src.utils.source_manager", "SourceManager"),
+                ("Config Manager", "src.utils.config_manager", "ConfigManager"),
+            ]
+
+            passed = 0
+            failed = 0
+
+            for name, module_path, class_name in test_imports:
+                try:
+                    # Try importing
+                    parts = module_path.split('.')
+                    module = __import__(module_path)
+                    for part in parts[1:]:
+                        module = getattr(module, part)
+
+                    # Try accessing class
+                    cls = getattr(module, class_name)
+
+                    self.root.after(0, lambda n=name: self.log_diag(f"  ✓ {n}", append=True))
+                    passed += 1
+                except Exception as e:
+                    self.root.after(0, lambda n=name, err=str(e): self.log_diag(f"  ✗ {n}: {err}", append=True))
+                    failed += 1
+
+            self.root.after(0, lambda p=passed, f=failed: self.log_diag(f"\n[RESULT] {p} passed, {f} failed", append=True))
+
+            if failed == 0:
+                self.root.after(0, lambda: self.log_diag("[SUCCESS] All imports successful", append=True))
+            else:
+                self.root.after(0, lambda: self.log_diag("[WARNING] Some imports failed", append=True))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def build_config_tab(self):
         frame = ttk.Frame(self.tab_config, padding=20)
