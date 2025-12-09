@@ -140,10 +140,30 @@ def validate_vector_store(verbose: bool = False) -> VectorStoreStatus:
         if len(items) < 100:
             warnings.append(f"Only {len(items)} chunks indexed - unusually small. Expected thousands for full UE5 source.")
 
-        # Validate embedding dimensions (should be 384 for all-MiniLM-L6-v2)
-        expected_dims = 384
-        if embeddings.shape[1] != expected_dims:
-            warnings.append(f"Embedding dimensions are {embeddings.shape[1]}, expected {expected_dims}. May indicate model mismatch.")
+        # Detect configured embed model and expected dimensions
+        try:
+            from config_manager import ConfigManager
+            config_mgr = ConfigManager(root)
+            embed_model = config_mgr.get('EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
+        except:
+            embed_model = 'sentence-transformers/all-MiniLM-L6-v2'  # Default fallback
+
+        # Map known models to expected dimensions
+        model_dims = {
+            'sentence-transformers/all-MiniLM-L6-v2': 384,
+            'microsoft/unixcoder-base': 768,
+            'sentence-transformers/all-mpnet-base-v2': 768,
+        }
+
+        expected_dims = model_dims.get(embed_model, None)
+        actual_dims = embeddings.shape[1]
+
+        if expected_dims and actual_dims != expected_dims:
+            warnings.append(f"Embedding dimensions are {actual_dims}, but configured model '{embed_model}' expects {expected_dims}. Vector store may have been built with a different model. Consider rebuilding.")
+        elif expected_dims is None:
+            # Unknown model, just report actual dimensions
+            if verbose:
+                print(f"[INFO] Unknown embed model '{embed_model}', cannot validate dimensions. Actual dimensions: {actual_dims}")
 
         # Check for NaN or inf values
         if np.any(np.isnan(embeddings)) or np.any(np.isinf(embeddings)):
