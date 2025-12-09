@@ -21,13 +21,16 @@ from typing import Tuple, Optional
 class VectorStoreStatus:
     """Encapsulates vector store validation results"""
     def __init__(self, exists: bool, valid: bool, message: str,
-                 chunk_count: int = 0, size_mb: float = 0.0, warnings: list = None):
+                 chunk_count: int = 0, size_mb: float = 0.0, warnings: list = None,
+                 dimensions: int = 0, embed_model: str = ""):
         self.exists = exists
         self.valid = valid
         self.message = message
         self.chunk_count = chunk_count
         self.size_mb = size_mb
         self.warnings = warnings or []
+        self.dimensions = dimensions
+        self.embed_model = embed_model
 
 
 def get_script_root() -> Path:
@@ -141,12 +144,23 @@ def validate_vector_store(verbose: bool = False) -> VectorStoreStatus:
             warnings.append(f"Only {len(items)} chunks indexed - unusually small. Expected thousands for full UE5 source.")
 
         # Detect configured embed model and expected dimensions
-        try:
-            from config_manager import ConfigManager
-            config_mgr = ConfigManager(root)
-            embed_model = config_mgr.get('EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
-        except:
-            embed_model = 'sentence-transformers/all-MiniLM-L6-v2'  # Default fallback
+        embed_model = 'sentence-transformers/all-MiniLM-L6-v2'  # Default
+
+        # Read config directly from .env file (avoid import issues)
+        config_file = root / "config" / ".env"
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('EMBED_MODEL='):
+                            embed_model = line.split('=', 1)[1].strip()
+                            if verbose:
+                                print(f"[DEBUG] Read EMBED_MODEL from config: {embed_model}")
+                            break
+            except Exception as e:
+                if verbose:
+                    print(f"[DEBUG] Failed to read config file, using default. Error: {e}")
 
         # Map known models to expected dimensions
         model_dims = {
@@ -158,12 +172,36 @@ def validate_vector_store(verbose: bool = False) -> VectorStoreStatus:
         expected_dims = model_dims.get(embed_model, None)
         actual_dims = embeddings.shape[1]
 
+        # Infer actual model from dimensions
+        # Prefer more specific models (unixcoder for code, mpnet for general)
+        def infer_model_from_dims(dims: int) -> Optional[str]:
+            if dims == 384:
+                return 'sentence-transformers/all-MiniLM-L6-v2'
+            elif dims == 768:
+                # Prefer unixcoder for code-specific embeddings
+                return 'microsoft/unixcoder-base'
+            return None
+
+        inferred_model = infer_model_from_dims(actual_dims)
+
         if expected_dims and actual_dims != expected_dims:
-            warnings.append(f"Embedding dimensions are {actual_dims}, but configured model '{embed_model}' expects {expected_dims}. Vector store may have been built with a different model. Consider rebuilding.")
+            # Config doesn't match actual vector store
+            if inferred_model:
+                warnings.append(f"Vector store uses {actual_dims}D embeddings ({inferred_model}), but config specifies '{embed_model}' ({expected_dims}D). Consider updating config to match.")
+                # Use inferred model for display
+                embed_model = inferred_model
+            else:
+                warnings.append(f"Embedding dimensions are {actual_dims}, but configured model '{embed_model}' expects {expected_dims}. Vector store may have been built with a different model. Consider rebuilding.")
         elif expected_dims is None:
-            # Unknown model, just report actual dimensions
-            if verbose:
-                print(f"[INFO] Unknown embed model '{embed_model}', cannot validate dimensions. Actual dimensions: {actual_dims}")
+            # Unknown configured model - try to infer
+            if inferred_model:
+                embed_model = inferred_model
+                if verbose:
+                    print(f"[INFO] Inferred model from dimensions: {inferred_model} ({actual_dims}D)")
+            else:
+                # Unknown model and unknown dimensions
+                if verbose:
+                    print(f"[INFO] Unknown embed model '{embed_model}', cannot validate dimensions. Actual dimensions: {actual_dims}")
 
         # Check for NaN or inf values
         if np.any(np.isnan(embeddings)) or np.any(np.isinf(embeddings)):
@@ -182,7 +220,9 @@ def validate_vector_store(verbose: bool = False) -> VectorStoreStatus:
             message=f"Vector store is valid and ready to use.",
             chunk_count=len(items),
             size_mb=vector_size_mb,
-            warnings=warnings
+            warnings=warnings,
+            dimensions=actual_dims,
+            embed_model=embed_model
         )
 
     except Exception as e:
@@ -225,7 +265,10 @@ def print_status(status: VectorStoreStatus, verbose: bool = False):
     print(f"    {status.message}")
     print(f"    Chunks: {status.chunk_count:,}")
     print(f"    Size: {status.size_mb:.1f} MB")
-    print(f"    Dimensions: 384 (all-MiniLM-L6-v2)")
+    if status.dimensions and status.embed_model:
+        print(f"    Dimensions: {status.dimensions} ({status.embed_model})")
+    elif status.dimensions:
+        print(f"    Dimensions: {status.dimensions}")
 
     if status.warnings:
         print()

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(tree:*)",
-      "Bash(cmd /c \"ask.bat FHitResult --top-k 1\")"
+      "Bash(cmd /c \"ask.bat FHitResult --top-k 1\")",
+      "Bash(\".venv\\Scripts\\python.exe\" src/utils/verify_vector_store.py --verbose)"
     ],
     "deny": [],
     "ask": []
