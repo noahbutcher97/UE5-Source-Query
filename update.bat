@@ -1,43 +1,52 @@
 @echo off
-REM UE5 Source Query - Smart Update System
-REM Updates deployed installation from local dev repo or remote GitHub
+REM UE5 Source Query - Bidirectional Update System
+REM Pull updates from source OR push updates to deployments
 
-echo ============================================================
-echo UE5 Source Query - Smart Update
-echo ============================================================
-echo.
+setlocal enabledelayedexpansion
 
 REM Check if virtual environment exists
 if not exist ".venv\Scripts\python.exe" (
     echo ERROR: Virtual environment not found!
-    echo This script must be run from a deployed UE5 Source Query installation.
+    echo Run Setup.bat first to create .venv
     echo.
-    echo Press any key to exit...
-    pause >nul
+    pause
     exit /b 1
 )
 
 REM Run update script with all arguments passed through
 .venv\Scripts\python.exe tools\update.py %*
+set EXIT_CODE=%ERRORLEVEL%
 
-REM Check exit code
-if errorlevel 1 (
+REM If no arguments provided, show context-sensitive help
+if "%~1"=="" (
     echo.
-    echo ============================================================
-    echo Update FAILED!
-    echo ============================================================
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    if exist ".git" (
+        if exist ".deployments_registry.json" (
+            echo -----------------------------------------------------------
+            echo DEV REPO DETECTED - Push updates to deployments:
+            echo   update.bat --push-all           Push to all deployments
+            echo   update.bat --push PATH          Push to specific deployment
+            echo   update.bat --dry-run --push-all Preview changes
+            echo -----------------------------------------------------------
+        )
+    ) else if exist ".ue5query_deploy.json" (
+        echo -----------------------------------------------------------
+        echo DEPLOYED INSTALLATION - Pull updates from source:
+        echo   update.bat                      Pull updates
+        echo   update.bat --check              Check for updates only
+        echo   update.bat --source local       Force local dev repo
+        echo   update.bat --source remote      Force remote GitHub
+        echo -----------------------------------------------------------
+    )
 )
 
 echo.
-echo ============================================================
-echo Update COMPLETE!
-echo ============================================================
-echo.
-echo You may need to restart any running applications.
-echo.
-echo Press any key to exit...
+if %EXIT_CODE% equ 0 (
+    echo Press any key to exit...
+) else (
+    echo Press any key to exit...
+)
 pause >nul
-exit /b 0
+
+endlocal
+exit /b %EXIT_CODE%

@@ -4,7 +4,9 @@
       "Bash(tree:*)",
       "Bash(cmd /c \"ask.bat FHitResult --top-k 1\")",
       "Bash(\".venv\\Scripts\\python.exe\" src/utils/verify_vector_store.py --verbose)",
-      "Bash(\".venv\\Scripts\\python.exe\":*)"
+      "Bash(\".venv\\Scripts\\python.exe\":*)",
+      "Bash(\".venv\\Scripts\\python.exe\" tools/update.py --help)",
+      "Bash(\".venv\\Scripts\\python.exe\" tools/update.py --push-all --dry-run)"
     ],
     "deny": [],
     "ask": []

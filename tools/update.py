@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
-Smart Update System for UE5 Source Query
-Updates deployed installation from local dev repo or remote GitHub.
+Bidirectional Update System for UE5 Source Query
 
-Usage:
-    python tools/update.py                    # Auto-detect source
-    python tools/update.py --source local     # Force local dev repo
-    python tools/update.py --source remote    # Force remote repo
-    python tools/update.py --dry-run          # Show what would change
+Two-way update utility that works intelligently based on context:
+
+**When run from DEV REPO:**
+    Updates ALL tracked deployments with local changes
+    Usage: python tools/update.py --push-all
+           python tools/update.py --push <deployment_path>
+
+**When run from DEPLOYED REPO:**
+    Pulls updates from dev repo or remote
+    Usage: python tools/update.py                    # Auto-detect source
+           python tools/update.py --source local     # Force local dev repo
+           python tools/update.py --source remote    # Force remote repo
+           python tools/update.py --check            # Check for updates only
+
+**General Options:**
+    --dry-run          Show what would change without applying
+    --force            Force update even if versions match
 """
 
 import json
@@ -79,6 +90,62 @@ def robust_rmtree(path: Path, max_attempts: int = 3):
         shutil.rmtree(path, ignore_errors=True)
     except:
         pass
+
+
+def get_version(root: Path) -> Optional[str]:
+    """Get version from src/__init__.py"""
+    try:
+        init_file = root / "src" / "__init__.py"
+        if init_file.exists():
+            with open(init_file, 'r') as f:
+                for line in f:
+                    if line.startswith('__version__'):
+                        # Extract version string
+                        return line.split('=')[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return None
+
+
+def compare_versions(v1: str, v2: str) -> int:
+    """
+    Compare two semantic version strings.
+
+    Returns:
+        1 if v1 > v2
+        0 if v1 == v2
+        -1 if v1 < v2
+    """
+    try:
+        # Parse semantic versions (e.g., "2.0.0")
+        parts1 = [int(x) for x in v1.split('.')]
+        parts2 = [int(x) for x in v2.split('.')]
+
+        # Pad to same length
+        max_len = max(len(parts1), len(parts2))
+        parts1.extend([0] * (max_len - len(parts1)))
+        parts2.extend([0] * (max_len - len(parts2)))
+
+        # Compare
+        for p1, p2 in zip(parts1, parts2):
+            if p1 > p2:
+                return 1
+            elif p1 < p2:
+                return -1
+        return 0
+    except Exception:
+        # If parsing fails, assume equal
+        return 0
+
+
+def is_dev_repo(root: Path) -> bool:
+    """Check if this is a dev repo (has .git and .deployments_registry.json)"""
+    return (root / ".git").exists() and (root / ".deployments_registry.json").exists()
+
+
+def is_deployed_repo(root: Path) -> bool:
+    """Check if this is a deployed repo (has .ue5query_deploy.json)"""
+    return (root / ".ue5query_deploy.json").exists()
 
 
 class UpdateManager:
@@ -390,6 +457,121 @@ class UpdateManager:
             print(f"[ERROR] Rollback failed: {e}")
             return False
 
+    def check_for_updates(self, source: str) -> Optional[Dict[str, Any]]:
+        """
+        Check if updates are available without applying them.
+
+        Returns:
+            Dict with keys: 'available', 'current_version', 'source_version', 'source'
+        """
+        current_version = get_version(self.deployment_root)
+        source_version = None
+
+        if source == "local":
+            local_repo = Path(self.config["update_sources"]["local_dev_repo"])
+            source_version = get_version(local_repo)
+        elif source == "remote":
+            # For remote, we'd need to fetch version without full clone
+            # Simplified: assume updates available
+            source_version = "remote"
+
+        result = {
+            'current_version': current_version or "unknown",
+            'source_version': source_version or "unknown",
+            'source': source
+        }
+
+        if current_version and source_version and source_version != "remote":
+            result['available'] = compare_versions(source_version, current_version) > 0
+        else:
+            result['available'] = True  # Assume updates available if can't determine
+
+        return result
+
+    def push_to_deployment(self, target_path: Path, dry_run: bool = False) -> bool:
+        """
+        Push updates from dev repo to a single deployment.
+
+        Args:
+            target_path: Path to deployment directory
+            dry_run: If True, only show what would be updated
+
+        Returns:
+            True if successful
+        """
+        if not is_deployed_repo(target_path):
+            print(f"[ERROR] {target_path} is not a deployed installation")
+            return False
+
+        # Get versions
+        source_version = get_version(Path.cwd())
+        target_version = get_version(target_path)
+
+        print(f"\n[PUSH] {target_path}")
+        print(f"  Source: {source_version or 'unknown'}")
+        print(f"  Target: {target_version or 'unknown'}")
+
+        if source_version and target_version:
+            comparison = compare_versions(source_version, target_version)
+            if comparison == 0:
+                print(f"  [SKIP] Already up-to-date")
+                return True
+            elif comparison < 0:
+                print(f"  [WARN] Target is newer than source!")
+
+        if dry_run:
+            print(f"  [DRY-RUN] Would update files")
+            return True
+
+        # Create temporary UpdateManager for this deployment
+        temp_manager = UpdateManager(target_path)
+        if not temp_manager.load_config():
+            return False
+
+        # Use local update method
+        return temp_manager.update_from_local(dry_run=False)
+
+    def push_to_all_deployments(self, dry_run: bool = False) -> int:
+        """
+        Push updates from dev repo to ALL tracked deployments.
+
+        Returns:
+            Number of deployments successfully updated
+        """
+        dev_root = Path.cwd()
+        registry_file = dev_root / ".deployments_registry.json"
+
+        if not registry_file.exists():
+            print("[ERROR] No deployments registry found")
+            print("This doesn't appear to be a dev repo.")
+            return 0
+
+        try:
+            with open(registry_file, 'r') as f:
+                registry = json.load(f)
+        except Exception as e:
+            print(f"[ERROR] Failed to read registry: {e}")
+            return 0
+
+        deployments_dict = registry.get('deployments', {})
+        if not deployments_dict:
+            print("[INFO] No deployments tracked")
+            return 0
+
+        print(f"\n[PUSH-ALL] Updating {len(deployments_dict)} deployment(s)\n")
+
+        success_count = 0
+        for deploy_id, deploy_info in deployments_dict.items():
+            deploy_path = Path(deploy_info['path'])
+            if deploy_path.exists():
+                if self.push_to_deployment(deploy_path, dry_run):
+                    success_count += 1
+            else:
+                print(f"[WARN] Deployment not found: {deploy_path}")
+
+        print(f"\n[SUMMARY] Updated {success_count}/{len(deployments_dict)} deployments")
+        return success_count
+
     def verify_installation(self) -> bool:
         """Verify installation after update"""
         print("\n[CHECK] Verifying installation...")
@@ -413,30 +595,120 @@ class UpdateManager:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Update UE5 Source Query installation")
-    parser.add_argument("--source", choices=["local", "remote"], help="Force update source")
+    parser = argparse.ArgumentParser(
+        description="Bidirectional Update System for UE5 Source Query",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # From deployed repo - pull updates
+  python tools/update.py
+  python tools/update.py --check
+  python tools/update.py --source local
+
+  # From dev repo - push to deployments
+  python tools/update.py --push-all
+  python tools/update.py --push /path/to/deployment
+        """
+    )
+
+    # Pull mode arguments (for deployed repos)
+    parser.add_argument("--source", choices=["local", "remote"], help="Force update source (pull mode)")
+    parser.add_argument("--check", action="store_true", help="Check for updates without applying")
+
+    # Push mode arguments (for dev repos)
+    parser.add_argument("--push-all", action="store_true", help="Push updates to all tracked deployments (dev repo only)")
+    parser.add_argument("--push", type=str, metavar="PATH", help="Push updates to specific deployment (dev repo only)")
+
+    # General arguments
     parser.add_argument("--dry-run", action="store_true", help="Show what would change without applying")
+    parser.add_argument("--force", action="store_true", help="Force update even if versions match")
+
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("UE5 Source Query - Smart Update System")
-    print("=" * 60)
+    print("=" * 70)
+    print("UE5 Source Query - Bidirectional Update System")
+    print("=" * 70)
 
-    # Detect deployment root (current directory)
-    deployment_root = Path.cwd()
-    print(f"\nDeployment: {deployment_root}")
+    current_root = Path.cwd()
+    print(f"\nCurrent directory: {current_root}")
 
-    # Initialize update manager
-    manager = UpdateManager(deployment_root)
+    # Detect environment
+    is_dev = is_dev_repo(current_root)
+    is_deployed = is_deployed_repo(current_root)
 
-    # Load config
+    if is_dev:
+        print("[MODE] Development Repository")
+        current_version = get_version(current_root)
+        print(f"Version: {current_version or 'unknown'}\n")
+    elif is_deployed:
+        print("[MODE] Deployed Installation")
+        current_version = get_version(current_root)
+        print(f"Version: {current_version or 'unknown'}\n")
+    else:
+        print("[ERROR] Unknown repository type")
+        print("This doesn't appear to be a dev repo or deployed installation.")
+        return 1
+
+    # === PUSH MODE (Dev Repo → Deployments) ===
+    if args.push_all or args.push:
+        if not is_dev:
+            print("[ERROR] Push mode only works from development repository")
+            return 1
+
+        manager = UpdateManager(current_root)  # Dummy manager for push methods
+
+        if args.push_all:
+            success_count = manager.push_to_all_deployments(dry_run=args.dry_run)
+            return 0 if success_count > 0 else 1
+
+        elif args.push:
+            target_path = Path(args.push).resolve()
+            success = manager.push_to_deployment(target_path, dry_run=args.dry_run)
+            return 0 if success else 1
+
+    # === PULL MODE (Deployed Repo ← Source) ===
+    if not is_deployed:
+        print("[ERROR] Pull mode only works from deployed installation")
+        print("Use --push-all or --push from development repository")
+        return 1
+
+    manager = UpdateManager(current_root)
+
+    # Load deployment config
     if not manager.load_config():
         return 1
+
+    # Check for updates
+    if args.check:
+        print("\n[CHECK] Checking for updates...")
+        source = manager.detect_update_source(args.source)
+        if not source:
+            return 1
+
+        update_info = manager.check_for_updates(source)
+        print(f"\n  Current: {update_info['current_version']}")
+        print(f"  Source:  {update_info['source_version']} ({update_info['source']})")
+
+        if update_info['available']:
+            print(f"\n  [!] Updates available")
+            print(f"\nRun without --check to apply updates")
+        else:
+            print(f"\n  [OK] Already up-to-date")
+
+        return 0
 
     # Detect update source
     source = manager.detect_update_source(args.source)
     if not source:
         return 1
+
+    # Check version before updating (skip if --force)
+    if not args.force:
+        update_info = manager.check_for_updates(source)
+        if not update_info['available']:
+            print(f"\n[INFO] Already up-to-date (version {update_info['current_version']})")
+            print(f"Use --force to update anyway\n")
+            return 0
 
     # Perform update
     if source == "local":
@@ -450,12 +722,12 @@ def main():
     # Verify installation (skip for dry run)
     if not args.dry_run:
         if not manager.verify_installation():
-            print("\n[WARN]  Verification failed! Installation may be incomplete.")
+            print("\n[WARN] Verification failed! Installation may be incomplete.")
             return 1
 
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("[OK] Update completed successfully!")
-        print("=" * 60)
+        print("=" * 70)
 
     return 0
 
