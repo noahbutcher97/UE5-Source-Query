@@ -635,14 +635,152 @@ done
 
 ---
 
+## Environment Configuration (Phase 6)
+
+### Automatic Engine Detection
+
+The tool automatically detects UE5 installations using multiple strategies (in priority order):
+
+1. **Environment Variables** (Highest Priority)
+2. **Config Files** (.ue5query)
+3. **Windows Registry** (Epic Games Launcher)
+4. **Common Install Locations** (C:/, D:/, E:/ drives)
+
+Detection results are cached for 24 hours for performance.
+
+### Environment Variables
+
+Set any of these variables to override detection:
+
+```bash
+# Windows (PowerShell)
+$env:UE5_ENGINE_PATH = "C:\Path\To\UE_5.3\Engine"
+
+# Windows (CMD)
+set UE5_ENGINE_PATH=C:\Path\To\UE_5.3\Engine
+
+# Permanent (System Environment Variables)
+# Control Panel → System → Advanced → Environment Variables
+```
+
+**Supported Variables:**
+- `UE5_ENGINE_PATH` - Recommended, specific to UE5
+- `UE_ROOT` - Generic Unreal Engine root
+- `UNREAL_ENGINE_PATH` - Alternative name
+- `UE5_ROOT` - Alternative UE5-specific name
+- `UE_ENGINE_PATH` - Generic engine path
+
+### Config File (.ue5query)
+
+Create `.ue5query` file in your project root or home directory:
+
+```json
+{
+  "engine": {
+    "path": "C:/Program Files/Epic Games/UE_5.3/Engine",
+    "version": "5.3.2"
+  },
+  "project": {
+    "root": "D:/Projects/MyGame",
+    "source_dirs": [
+      "Source/MyGame",
+      "Plugins/MyPlugin/Source"
+    ]
+  },
+  "preferences": {
+    "auto_rebuild_index": false,
+    "default_scope": "all"
+  }
+}
+```
+
+**Config File Locations (searched in order):**
+1. Current directory: `./.ue5query`
+2. Parent directory: `../.ue5query`
+3. Home directory: `~/.ue5query`
+
+**Example:** See `.ue5query.example` in project root
+
+### Detection Health Scores
+
+The GUI Dashboard shows health scores for each detected installation:
+
+- **100%** - Perfect: All directories and files present
+- **80-99%** - Good: Minor issues (e.g., missing some plugins)
+- **50-79%** - Fair: Some required directories missing
+- **<50%** - Poor: Incomplete installation
+
+Installations with warnings still work but may have reduced functionality.
+
+### Manual Setup (If Detection Fails)
+
+If automatic detection fails:
+
+1. **Set Environment Variable** (Recommended)
+   ```powershell
+   $env:UE5_ENGINE_PATH = "C:\Your\Path\To\UE_5.3\Engine"
+   ```
+
+2. **Create .ue5query file** (Project-specific)
+   ```bash
+   # In your project root
+   copy .ue5query.example .ue5query
+   # Edit .ue5query with your paths
+   ```
+
+3. **Use GUI Browse Button** (One-time)
+   - Launch `launcher.bat`
+   - Go to Source Manager tab
+   - Click "Auto-Detect" or "Browse"
+
+4. **Check Standard Locations**
+   - Ensure UE5 is in: `C:\Program Files\Epic Games\UE_5.X`
+   - Or use Epic Games Launcher for automatic registry
+
+### Testing Detection
+
+**CLI Test:**
+```bash
+# Test detection directly
+python src/utils/environment_detector.py --json
+
+# Force cache refresh
+python src/utils/environment_detector.py --no-cache --json
+```
+
+**GUI Test:**
+- Launch `launcher.bat`
+- Go to Source Manager tab
+- Click "Auto-Detect"
+- Check log for detected engines and health scores
+
+### Cache Management
+
+Detection results are cached in `config/detection_cache.json` for 24 hours.
+
+**Clear Cache:**
+```bash
+# Delete cache file to force re-detection
+del config\detection_cache.json
+```
+
+**Disable Cache:**
+```bash
+# Use --no-cache flag (CLI only)
+python src/utils/environment_detector.py --no-cache
+```
+
+---
+
 ## Support & Feedback
 
 **Issues:** Report at project repository
 **Documentation:** See `docs/` folder
-**Examples:** See `examples/` folder (if available)
+**Examples:** See `examples/` folder (batch queries)
+**Phase 6:** Environment detection with multi-strategy fallback
 
 ---
 
-*Last Updated: 2025-12-02*
+*Last Updated: 2025-12-03*
 *For: AI Coding Agents*
-*Version: 2.0.0*
+*Version: 2.1.0 (Phase 6)*

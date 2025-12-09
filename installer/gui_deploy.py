@@ -663,21 +663,38 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
         def detect():
             try:
-                installations = get_available_engines(self.source_dir)
+                # Use Phase 6 detection with validation and health scores
+                installations = get_available_engines(self.source_dir, use_cache=True)
 
                 if not installations:
                     self.root.after(0, lambda: self.log("! No UE5 installation detected"))
-                    self.root.after(0, lambda: messagebox.showwarning(
-                        "Not Found",
-                        "Could not auto-detect UE5. Please browse manually."
-                    ))
+                    self.root.after(0, lambda: self.show_detection_help_dialog())
                     return
 
+                # Sort by health score (should already be sorted, but ensure)
+                installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
+
+                # Log all found installations with health info
+                for inst in installations:
+                    health_pct = int(inst.get('health_score', 0) * 100)
+                    source = inst.get('source', 'unknown')
+                    self.root.after(0, lambda v=inst['version'], s=source, h=health_pct:
+                        self.log(f"  Found {v} ({s}) - Health: {h}%"))
+
                 if len(installations) == 1:
-                    path = installations[0]['engine_root']
-                    version = installations[0]['version']
+                    install = installations[0]
+                    path = install['engine_root']
+                    version = install['version']
+                    health = int(install.get('health_score', 0) * 100)
+
+                    # Warn if health is low
+                    if health < 70:
+                        warnings = install.get('warnings', [])
+                        warn_msg = "\n".join(warnings) if warnings else "Installation may be incomplete"
+                        self.root.after(0, lambda w=warn_msg: self.log(f"⚠ Warning: {w}"))
+
                     self.root.after(0, lambda: self.engine_path.set(path))
-                    self.root.after(0, lambda: self.log(f"✓ Detected {version}: {path}"))
+                    self.root.after(0, lambda: self.log(f"✓ Selected {version} (health: {health}%)"))
                 else:
                     self.root.after(0, lambda: self.show_version_selector(installations))
 
@@ -689,36 +706,167 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
         threading.Thread(target=detect, daemon=True).start()
 
-    def show_version_selector(self, installs):
+    def show_detection_help_dialog(self):
+        """Phase 6: Guide user through manual setup when detection fails"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Select UE5 Version")
-        dialog.geometry("500x300")
+        dialog.title("UE5 Engine Not Found - Setup Help")
+        dialog.geometry("700x500")
         dialog.transient(self.root)
         dialog.grab_set()
 
         self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        ttk.Label(dialog, text="Multiple UE5 versions found. Select one:", font=Theme.FONT_BOLD).pack(pady=10)
-        
-        listbox = tk.Listbox(dialog, font=Theme.FONT_NORMAL)
-        listbox.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-        
+        # Title
+        title_frame = ttk.Frame(dialog)
+        title_frame.pack(fill=tk.X, padx=20, pady=10)
+        ttk.Label(title_frame, text="No UE5 installation detected automatically",
+                  font=Theme.FONT_BOLD).pack()
+
+        # Help text with scrollbar
+        text_frame = ttk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        help_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
+                            font=Theme.FONT_NORMAL, relief=tk.FLAT, bg="#f0f0f0")
+        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=help_text.yview)
+
+        help_content = """To help us find your UE5 engine installation, try one of these methods:
+
+1. SET ENVIRONMENT VARIABLE (Recommended)
+
+   Set one of these environment variables:
+   • UE5_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
+   • UE_ROOT = C:\\Path\\To\\UE_5.3\\Engine
+   • UNREAL_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
+
+   Then restart this application.
+
+2. CREATE .ue5query CONFIG FILE
+
+   Create a file named .ue5query in your project root or home directory:
+
+   {
+     "engine": {
+       "path": "C:/Path/To/UE_5.3/Engine",
+       "version": "5.3.2"
+     }
+   }
+
+3. INSTALL IN STANDARD LOCATION
+
+   Ensure UE5 is installed in one of these standard locations:
+   • C:\\Program Files\\Epic Games\\UE_5.X
+   • D:\\Program Files\\Epic Games\\UE_5.X
+   • C:\\Epic Games\\UE_5.X
+   • D:\\Epic Games\\UE_5.X
+
+4. USE EPIC GAMES LAUNCHER
+
+   Install UE5 via Epic Games Launcher. It will be automatically
+   registered in Windows Registry for detection.
+
+5. BROWSE MANUALLY (Below)
+
+   Click 'Browse Manually' to select your engine directory directly.
+"""
+
+        help_text.insert("1.0", help_content)
+        help_text.config(state=tk.DISABLED)
+
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Button(button_frame, text="Browse Manually",
+                   command=lambda: [dialog.destroy(), self.browse_engine()],
+                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="Close",
+                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def show_version_selector(self, installs):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Select UE5 Version")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self.root.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 600) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 400) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Multiple UE5 versions found. Please select one:",
+                  font=Theme.FONT_BOLD).pack(pady=10)
+
+        # Create frame with scrollbar for installations
+        frame = ttk.Frame(dialog)
+        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Use Listbox with detailed info
+        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=Theme.FONT_NORMAL,
+                             selectmode=tk.SINGLE)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        # Add installations with health scores
         for inst in installs:
-            listbox.insert(tk.END, f"{inst['version']} - {inst['engine_root']}")
-            
+            version = inst['version']
+            source = inst.get('source', 'unknown')
+            health = int(inst.get('health_score', 0) * 100)
+            path = inst['engine_root']
+
+            display = f"{version} | Health: {health}% | Source: {source}"
+            listbox.insert(tk.END, display)
+
+        # Info label for selected installation
+        info_label = ttk.Label(dialog, text="", font=Theme.FONT_SMALL, foreground="gray")
+        info_label.pack(pady=5)
+
+        def on_listbox_select(event):
+            selection = listbox.curselection()
+            if selection:
+                index = selection[0]
+                selected = installs[index]
+                info_label.config(text=f"Path: {selected['engine_root']}")
+
+        listbox.bind('<<ListboxSelect>>', on_listbox_select)
+
         def on_select():
             sel = listbox.curselection()
             if sel:
                 selected = installs[sel[0]]
+                health = int(selected.get('health_score', 0) * 100)
                 self.engine_path.set(selected['engine_root'])
-                self.log(f"✓ Selected: {selected['version']}")
-                self.log(f"  Engine Path: {selected['engine_root']}")
+                self.log(f"✓ Selected {selected['version']} (health: {health}%)")
+
+                # Show warnings if any
+                warnings = selected.get('warnings', [])
+                if warnings:
+                    for warning in warnings:
+                        self.log(f"⚠ {warning}")
+
                 dialog.destroy()
-                
-        ttk.Button(dialog, text="Select", command=on_select).pack(pady=10)
+            else:
+                messagebox.showwarning("No Selection", "Please select an installation")
+
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=15)
+
+        ttk.Button(button_frame, text="Select", command=on_select,
+                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
     def start_install(self):
         self.btn_install.config(state=tk.DISABLED)
@@ -1027,6 +1175,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 except Exception as e:
                     self.log(f"  ! Failed to create shortcut: {e}")
 
+            # Create deployment configuration for smart updates
+            self.log("Creating deployment configuration...")
+            self._create_deployment_config(target)
+
             self.log("SUCCESS! Installation Complete.")
             messagebox.showinfo("Success", "Installation Complete!")
             
@@ -1039,6 +1191,94 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             self.current_process = None
             self.btn_install.config(state=tk.NORMAL)
             self.btn_cancel.config(text="Close")
+
+    def _create_deployment_config(self, target: Path):
+        """
+        Create .ue5query_deploy.json for smart update system.
+
+        This allows deployed installations to pull updates from local dev repo
+        or remote GitHub repository.
+        """
+        import datetime
+
+        # Detect if source is a git repo (for remote URL detection)
+        remote_repo = "https://github.com/yourusername/UE5-Source-Query.git"  # Default
+        branch = "master"
+
+        try:
+            # Try to get git remote URL from source repo
+            result = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=self.source_dir,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                remote_repo = result.stdout.strip()
+
+            # Get current branch
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self.source_dir,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                branch = result.stdout.strip()
+        except:
+            # If git detection fails, use defaults
+            pass
+
+        config = {
+            "version": self.get_tool_version(),
+            "deployment_info": {
+                "deployed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "deployed_from": str(self.source_dir),
+                "deployment_method": "gui_installer",
+                "deployed_to": str(target),
+                "last_updated": None,
+                "update_source": None,
+                "updated_from": None
+            },
+            "update_sources": {
+                "local_dev_repo": str(self.source_dir),
+                "remote_repo": remote_repo,
+                "branch": branch
+            },
+            "update_strategy": "auto",
+            "exclude_patterns": [
+                ".venv/",
+                "data/vector_store.npz",
+                "data/vector_meta*.json",
+                ".git/",
+                "__pycache__/",
+                "*.pyc",
+                "*.pyo",
+                "*.pyd",
+                ".pytest_cache",
+                ".coverage",
+                "*.log"
+            ],
+            "preserve_local": [
+                "config/user_config.json",
+                ".env",
+                "data/vector_store.npz",
+                "data/vector_meta.json",
+                "data/vector_meta_enriched.json",
+                "data/vector_cache.json"
+            ]
+        }
+
+        config_file = target / ".ue5query_deploy.json"
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        self.log(f"  ✓ Deployment config created: .ue5query_deploy.json")
+        self.log(f"  - Local dev repo: {self.source_dir}")
+        self.log(f"  - Remote repo: {remote_repo}")
+        self.log(f"  - Update available via: update.bat")
 
     def log(self, msg):
         self.log_queue.put(msg)

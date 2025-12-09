@@ -1,0 +1,31 @@
+{
+  "_comment": "UE5 Source Query Tool Configuration File",
+  "_description": "Place this file as .ue5query in your project root or home directory",
+  "_usage": [
+    "1. Copy this file to .ue5query (remove .example extension)",
+    "2. Update the paths below to match your installation",
+    "3. Restart the tool or refresh detection"
+  ],
+
+  "engine": {
+    "_comment": "UE5 Engine installation configuration",
+    "path": "C:/Program Files/Epic Games/UE_5.3/Engine",
+    "version": "5.3.2"
+  },
+
+  "project": {
+    "_comment": "Optional: Specify project-specific paths",
+    "root": "D:/Projects/MyGame",
+    "source_dirs": [
+      "Source/MyGame",
+      "Plugins/MyPlugin/Source"
+    ]
+  },
+
+  "preferences": {
+    "_comment": "Optional: Customize tool behavior",
+    "auto_rebuild_index": false,
+    "default_scope": "all",
+    "cache_detection_results": true
+  }
+}

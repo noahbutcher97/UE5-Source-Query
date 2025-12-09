@@ -22,6 +22,7 @@ class Theme:
     FONT_SUBHEADER = ("Segoe UI", 12)
     FONT_NORMAL = ("Segoe UI", 10)
     FONT_BOLD = ("Segoe UI", 10, "bold")
+    FONT_SMALL = ("Segoe UI", 9)
     FONT_MONO = ("Consolas", 9)
 
     @staticmethod

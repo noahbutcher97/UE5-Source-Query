@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(cmd /c \"ask.bat FHitResult --top-k 1\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -40,6 +40,34 @@ python -c "import sentence_transformers; import anthropic; print('Dependencies O
 ask.bat --build-index
 ```
 
+### 🔍 Environment Detection (Phase 6 - NEW!)
+
+The tool now automatically detects UE5 installations using multiple strategies. No manual path configuration needed in most cases!
+
+**Quick Setup Options:**
+
+```bash
+# Option 1: Set environment variable (Recommended)
+$env:UE5_ENGINE_PATH = "C:\Path\To\UE_5.3\Engine"  # PowerShell
+set UE5_ENGINE_PATH=C:\Path\To\UE_5.3\Engine       # CMD
+
+# Option 2: Create .ue5query config file
+# Copy .ue5query.example to .ue5query and edit paths
+
+# Option 3: Use GUI auto-detection
+launcher.bat  # Opens Unified Dashboard with auto-detect button
+```
+
+**Detection Strategies (Priority Order):**
+1. ✅ Environment variables (`UE5_ENGINE_PATH`, `UE_ROOT`, etc.)
+2. ✅ Config files (`.ue5query` in project/home directory)
+3. ✅ Windows Registry (Epic Games Launcher installs)
+4. ✅ Common install locations (C:/Program Files/Epic Games, etc.)
+
+**Health Scores:** Each detected installation gets a 0-100% health score based on validation checks.
+
+See [AI_AGENT_GUIDE.md - Environment Configuration](docs/Production/UsageGuide/AI_AGENT_GUIDE.md#environment-configuration-phase-6) for details.
+
 **Once configured, run queries:**
 ```bash
 # Basic queries
@@ -612,4 +640,4 @@ Built to solve semantic search accuracy problems when querying UE5.3 source code
 **Problem:** "FHitResult members" returned wrong files
 **Solution:** Hybrid routing with intelligent intent analysis
 
-All 7 optimization phases implemented! 🎉
+All 7 optimization phases implemented! 🎉# Test update marker - 20251208_183325

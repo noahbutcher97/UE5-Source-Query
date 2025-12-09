@@ -78,29 +78,32 @@ class UnifiedDashboard:
         self._load_initial_engine_path()
         
     def _load_initial_engine_path(self):
-        # This will load the path from EngineDirs.txt if present, or detect it.
-        # It's better to auto-detect/populate the engine_path_var in the config tab.
-        # For the source tab, we just need to display it.
-        # So we can just set this textvariable from the config tab's auto_detect method.
-        # For now, we can try to guess from the first path in EngineDirs.txt
-        engine_dirs = self.source_manager.get_engine_dirs()
-        if engine_dirs:
-            try:
+        """Auto-detect engine path using comprehensive detection"""
+        try:
+            # Use the engine_helper's comprehensive detection
+            engines = get_available_engines(self.script_dir)
+            if engines:
+                # Use the first detected engine
+                first_engine = engines[0]
+                engine_path = first_engine.get('path') or first_engine.get('root')
+                if engine_path:
+                    self.engine_path_var.set(str(engine_path))
+                    return
+
+            # Fallback: try to infer from EngineDirs.txt
+            engine_dirs = self.source_manager.get_engine_dirs()
+            if engine_dirs:
                 p = Path(engine_dirs[0])
                 if "Engine" in p.parts:
                     idx = p.parts.index("Engine")
                     self.engine_path_var.set(str(Path(*p.parts[:idx+1])))
-                else:
-                    # If it's a direct Source path, try to infer root
-                    parts = p.parts
-                    if 'Source' in parts:
-                        source_idx = parts.index('Source')
-                        if source_idx > 0:
-                            self.engine_path_var.set(str(Path(*parts[:source_idx])))
-            except Exception:
-                self.engine_path_var.set("Engine path could not be inferred.")
-        else:
-            self.engine_path_var.set("No engine path configured.")
+                    return
+
+            # No engine found
+            self.engine_path_var.set("No UE5 engine detected - click Auto-Detect")
+
+        except Exception as e:
+            self.engine_path_var.set(f"Auto-detection failed: {str(e)}")
         
     def create_layout(self):
         # Header
@@ -1383,8 +1386,23 @@ class UnifiedDashboard:
         batch_size_combo.pack(fill=tk.X)
         ttk.Label(gpu_frame, text="Smaller batches = more stable, larger batches = faster (if no errors)", font=Theme.FONT_NORMAL, foreground="#666", wraplength=500).pack(anchor=tk.W, pady=(5, 0))
 
-        # Save Button
-        ttk.Button(frame, text="💾 Save Configuration", command=self.save_configuration, style='Accent.TButton').pack(pady=20)
+        # Action Buttons
+        button_frame = tk.Frame(frame, bg=Theme.BG_LIGHT)
+        button_frame.pack(pady=20)
+
+        ttk.Button(
+            button_frame,
+            text="🔍 Test Configuration",
+            command=self.test_configuration,
+            style='Accent.TButton'
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            button_frame,
+            text="💾 Save Configuration",
+            command=self.save_configuration,
+            style='Accent.TButton'
+        ).pack(side=tk.LEFT)
         
         # Log for config operations
         config_log_frame = ttk.LabelFrame(frame, text=" Configuration Log ", padding=5)
@@ -1417,6 +1435,103 @@ class UnifiedDashboard:
                 self.engine_path_var.set("Error loading path: " + str(e))
         else:
             self.engine_path_var.set("Not detected. Run auto-detect.")
+
+    def test_configuration(self):
+        """Comprehensive configuration validation with auto-detection and user guidance"""
+        self.log_config("Testing configuration...", clear=True)
+
+        def _test():
+            issues = []
+            warnings = []
+
+            # 1. Test API Key
+            api_key = self.api_key_var.get()
+            if not api_key or api_key.strip() == "" or api_key == "your_api_key_here":
+                issues.append("❌ API Key: Not configured")
+                self.root.after(0, lambda: self.log_config("❌ API Key: Missing - Please add your Anthropic API key", append=True))
+            elif not api_key.startswith("sk-ant-"):
+                warnings.append("⚠️ API Key: Format looks incorrect (should start with 'sk-ant-')")
+                self.root.after(0, lambda: self.log_config("⚠️ API Key: Format may be incorrect", append=True))
+            else:
+                self.root.after(0, lambda: self.log_config("✓ API Key: Configured", append=True))
+
+            # 2. Test Engine Path
+            engine_path = self.engine_path_var.get()
+            if (not engine_path or
+                "No UE5 engine detected" in engine_path or
+                "{ENGINE_ROOT}" in engine_path or
+                "Not detected" in engine_path or
+                "Auto-detection failed" in engine_path):
+                # Try auto-detection
+                self.root.after(0, lambda: self.log_config("🔍 Attempting to auto-detect engine path...", append=True))
+                engines = get_available_engines(self.script_dir)
+                if engines:
+                    first_engine = engines[0]
+                    detected_path = first_engine.get('path') or first_engine.get('root')
+                    if detected_path:
+                        self.root.after(0, lambda p=detected_path: self.engine_path_var.set(str(p)))
+                        self.root.after(0, lambda p=detected_path: self.log_config(f"✓ Engine Path: Auto-detected at {p}", append=True))
+                    else:
+                        issues.append("❌ Engine Path: Could not auto-detect")
+                        self.root.after(0, lambda: self.log_config("❌ Engine Path: Auto-detection failed - please browse manually", append=True))
+                else:
+                    issues.append("❌ Engine Path: No UE5 installation found")
+                    self.root.after(0, lambda: self.log_config("❌ Engine Path: No UE5 installation detected", append=True))
+            else:
+                # Validate existing path
+                engine_dir = Path(engine_path)
+                if engine_dir.exists():
+                    self.root.after(0, lambda p=engine_path: self.log_config(f"✓ Engine Path: Valid ({p})", append=True))
+                else:
+                    issues.append(f"❌ Engine Path: Directory does not exist: {engine_path}")
+                    self.root.after(0, lambda p=engine_path: self.log_config(f"❌ Engine Path: Invalid - {p} does not exist", append=True))
+
+            # 3. Test Vector Store Directory
+            vector_dir = Path(self.vector_store_var.get())
+            if vector_dir.exists():
+                self.root.after(0, lambda: self.log_config(f"✓ Vector Store: Directory exists", append=True))
+            else:
+                self.root.after(0, lambda: self.log_config(f"⚠️ Vector Store: Directory will be created on first use", append=True))
+                warnings.append("⚠️ Vector Store: Directory will be created on first use")
+
+            # 4. Test Model Settings
+            embed_model = self.embed_model_var.get()
+            api_model = self.api_model_var.get()
+            self.root.after(0, lambda m=embed_model: self.log_config(f"✓ Embedding Model: {m}", append=True))
+            self.root.after(0, lambda m=api_model: self.log_config(f"✓ API Model: {m}", append=True))
+
+            # 5. Test Batch Size
+            batch_size = self.embed_batch_size_var.get()
+            try:
+                bs_int = int(batch_size)
+                if bs_int < 1:
+                    warnings.append("⚠️ Batch Size: Very small, might be slow")
+                self.root.after(0, lambda b=batch_size: self.log_config(f"✓ Batch Size: {b}", append=True))
+            except:
+                issues.append("❌ Batch Size: Invalid number")
+                self.root.after(0, lambda: self.log_config(f"❌ Batch Size: Invalid", append=True))
+
+            # Summary
+            self.root.after(0, lambda: self.log_config("\n" + "="*50, append=True))
+            if len(issues) == 0 and len(warnings) == 0:
+                self.root.after(0, lambda: self.log_config("✓ All configuration checks passed!", append=True))
+                self.root.after(0, lambda: messagebox.showinfo("Configuration Test", "All configuration checks passed! ✓"))
+            else:
+                if issues:
+                    self.root.after(0, lambda c=len(issues): self.log_config(f"\n{c} issue(s) found - please fix before using", append=True))
+                if warnings:
+                    self.root.after(0, lambda c=len(warnings): self.log_config(f"{c} warning(s) - system may work but check recommended", append=True))
+
+                msg = f"Configuration Test Complete:\n\n"
+                if issues:
+                    msg += f"❌ {len(issues)} critical issue(s) found\n"
+                if warnings:
+                    msg += f"⚠️ {len(warnings)} warning(s)\n"
+                msg += f"\nCheck the log below for details."
+
+                self.root.after(0, lambda m=msg: messagebox.showwarning("Configuration Test", m))
+
+        threading.Thread(target=_test, daemon=True).start()
 
     def save_configuration(self):
         config_dict = {
@@ -1699,14 +1814,87 @@ class UnifiedDashboard:
         action_frame = ttk.LabelFrame(frame, text=" Maintenance Actions ", padding=15)
         action_frame.pack(fill=tk.X, pady=(0, 20))
 
-        self.btn_rebuild = ttk.Button(action_frame, text="Rebuild Index", command=self.rebuild_index, style="Accent.TButton")
-        self.btn_rebuild.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.btn_update = ttk.Button(action_frame, text="Update Tool (Git Pull)", command=self.update_tool)
-        self.btn_update.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.btn_cancel = ttk.Button(action_frame, text="Close", command=self.cancel_or_close)
-        self.btn_cancel.pack(side=tk.LEFT)
+        # Grid layout for better organization
+        action_grid = tk.Frame(action_frame, bg=Theme.BG_LIGHT)
+        action_grid.pack(fill=tk.X)
+
+        # Row 1: Index Management
+        tk.Label(
+            action_grid,
+            text="Index Management:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        ).grid(row=0, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+
+        self.btn_rebuild = tk.Button(
+            action_grid,
+            text="🔄 Rebuild Index",
+            command=self.rebuild_index,
+            bg=Theme.SECONDARY,
+            fg="white",
+            padx=15,
+            pady=8,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        self.btn_rebuild.grid(row=0, column=1, padx=5, pady=5)
+
+        # Row 2: System Updates (Phase 6)
+        tk.Label(
+            action_grid,
+            text="System Updates:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        ).grid(row=1, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+
+        tk.Label(
+            action_grid,
+            text="Use System Status tab for updates",
+            font=("Arial", 9),
+            bg=Theme.BG_LIGHT,
+            fg="#7F8C8D"
+        ).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
+
+        # Row 3: Verification
+        tk.Label(
+            action_grid,
+            text="Verification:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        ).grid(row=2, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+
+        btn_verify = tk.Button(
+            action_grid,
+            text="✓ Verify Installation",
+            command=self.verify_installation,
+            bg=Theme.SUCCESS,
+            fg="white",
+            padx=15,
+            pady=8,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        btn_verify.grid(row=2, column=1, padx=5, pady=5)
+
+        # Close button at bottom
+        close_frame = tk.Frame(action_frame, bg=Theme.BG_LIGHT)
+        close_frame.pack(fill=tk.X, pady=(15, 0))
+
+        self.btn_cancel = tk.Button(
+            close_frame,
+            text="Close",
+            command=self.cancel_or_close,
+            bg="#7F8C8D",
+            fg="white",
+            padx=15,
+            pady=8,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        self.btn_cancel.pack(side=tk.RIGHT)
 
         # Log Section
         log_frame = ttk.LabelFrame(frame, text=" Operation Log ", padding=15)
@@ -1729,7 +1917,6 @@ class UnifiedDashboard:
                 self.log_maint("[CANCELLED] Operation cancelled.")
                 self.current_process = None
                 self.btn_rebuild.config(state=tk.NORMAL)
-                self.btn_update.config(state=tk.NORMAL)
                 self.btn_cancel.config(text="Close")
         else:
             self.root.destroy()
@@ -1752,7 +1939,6 @@ class UnifiedDashboard:
         
         self.log_maint("Starting index rebuild...", clear=True)
         self.btn_rebuild.config(state=tk.DISABLED)
-        self.btn_update.config(state=tk.DISABLED)
         self.btn_cancel.config(text="Cancel")
         self.cancelled = False
         
@@ -1788,7 +1974,6 @@ class UnifiedDashboard:
                     self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
             finally:
                 self.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
-                self.root.after(0, lambda: self.btn_update.config(state=tk.NORMAL))
                 self.root.after(0, lambda: self.btn_cancel.config(text="Close"))
                 self.current_process = None
 
@@ -1817,6 +2002,43 @@ class UnifiedDashboard:
                 self.root.after(0, lambda: self.log_maint("\n[DONE] Update complete.", append=True))
             except Exception as e:
                  self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def verify_installation(self):
+        """Run comprehensive installation verification"""
+        self.log_maint("Running installation verification...", clear=True)
+
+        def _run():
+            try:
+                # Check if verify_installation script exists
+                verify_script = self.script_dir / "src" / "utils" / "verify_installation.py"
+
+                if not verify_script.exists():
+                    self.root.after(0, lambda: self.log_maint("[ERROR] Verification script not found", append=True))
+                    return
+
+                # Run verification script
+                process = subprocess.Popen(
+                    [sys.executable, str(verify_script)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.script_dir)
+                )
+
+                for line in process.stdout:
+                    self.root.after(0, lambda l=line: self.log_maint(l.rstrip(), append=True))
+
+                process.wait()
+
+                if process.returncode == 0:
+                    self.root.after(0, lambda: self.log_maint("\n[SUCCESS] Installation verification passed!", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_maint(f"\n[WARNING] Some checks failed (exit code: {process.returncode})", append=True))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
 
         threading.Thread(target=_run, daemon=True).start()
 

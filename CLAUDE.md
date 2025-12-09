@@ -1,3 +1,6 @@
+
+
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with the UE5 Source Query System codebase.
@@ -7,6 +10,7 @@ This file provides guidance to Claude Code when working with the UE5 Source Quer
 **UE5 Source Query System** is an intelligent hybrid search tool for Unreal Engine 5.3 source code. It combines precise definition extraction with semantic search to provide accurate, context-aware results for UE5 API queries.
 
 ### Key Features
+**Core Query System (Phase 1):**
 - **Hybrid Query Routing**: Automatically detects query type (definition, semantic, or hybrid)
 - **Code-Trained Embeddings**: Uses `microsoft/unixcoder-base` (768 dims) for C++ code understanding
 - **Semantic Chunking**: Structure-aware chunking that respects C++ boundaries (functions, classes, macros)
@@ -16,38 +20,77 @@ This file provides guidance to Claude Code when working with the UE5 Source Quer
 - **Logical Compensation**: Structural boosts for better ranking (file path matching, header prioritization)
 - **Incremental Updates**: Hash-based caching for unchanged files
 
+**Advanced Features (Phases 2-5):**
+- **Filter DSL** (Phase 2): Rich filtering language for metadata-based search
+- **Unified Dashboard** (Phase 3): GUI interface with Query, Source Manager, Maintenance, and Diagnostics tabs
+- **Batch Processing** (Phase 4): Process multiple queries efficiently with JSONL format
+- **Relationship Extraction** (Phase 5): Automatic detection of class hierarchies and dependencies
+- **Health Checks** (Phase 2): Comprehensive installation and vector store validation
+- **Team Deployment** (Phase 2): GUI installer with per-machine path configuration
+
 ## Repository Structure
 
 ```
 D:\DevTools\UE5-Source-Query\
 ├── src/
-│   ├── core/                    # Query processing
+│   ├── core/                    # Query processing (Phases 1-5)
 │   │   ├── hybrid_query.py      # Main hybrid query engine
 │   │   ├── query_intent.py      # Query type detection
 │   │   ├── definition_extractor.py  # Regex-based C++ extraction
-│   │   ├── filtered_search.py   # Metadata-based filtering
-│   │   └── query_engine.py      # Semantic search (legacy)
+│   │   ├── filtered_search.py   # Metadata-based filtering (Phase 2)
+│   │   ├── filter_builder.py    # Filter DSL builder (Phase 2)
+│   │   ├── batch_query.py       # Batch processing (Phase 4)
+│   │   ├── relationship_extractor.py  # Relationship extraction (Phase 5)
+│   │   ├── output_formatter.py  # Result formatting (Phase 3)
+│   │   └── query_engine.py      # Semantic search
 │   ├── indexing/                # Vector store building
 │   │   ├── build_embeddings.py  # Main indexing script
+│   │   ├── detect_engine_path.py  # UE5 path detection
 │   │   ├── metadata_enricher.py # Entity detection & tagging
 │   │   ├── EngineDirs.txt       # 24 targeted UE5 directories
-│   │   └── BuildSourceIndex.ps1 # Legacy PowerShell indexer (deprecated)
-│   ├── utils/
-│   │   └── semantic_chunker.py  # C++ structure-aware chunking
-│   └── server/
-│       └── retrieval_server.py  # HTTP API (optional)
+│   │   └── BuildSourceIndex.ps1 # PowerShell indexer (deprecated)
+│   ├── utils/                   # Utilities & helpers
+│   │   ├── semantic_chunker.py  # C++ structure-aware chunking
+│   │   ├── config_manager.py    # Configuration management
+│   │   ├── source_manager.py    # Source directory manager (Phase 3)
+│   │   ├── verify_installation.py  # Health checks (Phase 2)
+│   │   └── verify_vector_store.py  # Vector validation (Phase 2)
+│   ├── management/              # GUI tools (Phase 3)
+│   │   └── gui_dashboard.py     # Unified Dashboard
+│   └── server/                  # HTTP API (optional)
+│       └── retrieval_server.py  # REST API server
+├── installer/                   # Deployment (Phase 2)
+│   └── gui_deploy.py            # GUI installer wizard
+├── tools/                       # Backend scripts (Phase 3)
+│   ├── health-check.bat         # System validation
+│   ├── rebuild-index.bat        # Index rebuilding
+│   ├── fix-paths.bat            # Path regeneration
+│   └── serve.bat                # HTTP server launcher
+├── examples/                    # Example files (Phase 4)
+│   ├── sample_batch_queries.jsonl
+│   └── batch_results.jsonl
 ├── data/
 │   ├── vector_store.npz         # Embeddings (768-dim, ~24MB)
 │   ├── vector_meta.json         # Chunk metadata (~3.9MB)
 │   └── vector_meta_enriched.json  # With entity tags (optional)
-├── docs/                        # Documentation
-│   ├── HYBRID_QUERY_GUIDE.md
-│   ├── AUDIT_REPORT.md
-│   └── IMPROVEMENT_ROADMAP.md
+├── docs/                        # Documentation (organized)
+│   ├── Production/              # User documentation
+│   │   ├── PROJECT_STRUCTURE.md
+│   │   ├── MAINTENANCE.md
+│   │   ├── TROUBLESHOOTING.md
+│   │   ├── Deployment/          # DEPLOYMENT.md, TEAM_SETUP.md
+│   │   ├── GPU/                 # GPU_SETUP.md, GPU_SUPPORT.md
+│   │   ├── GUI/                 # GUI_TOOLS.md
+│   │   └── UsageGuide/          # HYBRID_QUERY_GUIDE.md, AI_AGENT_GUIDE.md
+│   ├── Development/             # Development docs
+│   │   ├── ProjectAudits/       # Audit reports
+│   │   └── ProjectPlans/        # Phase plans (5, 6, etc.)
+│   └── _archive/                # Obsolete documentation
 ├── .indexignore                 # Default exclusion patterns
-├── DEFERRED_TASKS.md           # Future enhancements
-├── README.md                   # User documentation
-└── ask.bat                     # Windows entry point
+├── Setup.bat                    # Main installer
+├── launcher.bat                 # Unified Dashboard launcher
+├── ask.bat                      # CLI query interface
+└── README.md                    # User documentation
 ```
 
 ## Core Architecture
@@ -212,6 +255,21 @@ cd D:\DevTools\UE5-Source-Query
 
 ### Querying the Index
 
+**Via Unified Dashboard (Recommended - Phase 3):**
+```bash
+launcher.bat
+# Opens GUI with tabs for:
+# - Query: Interactive search with real-time results
+# - Source Manager: Add/remove source directories
+# - Maintenance: Rebuild index, verify installation
+# - Diagnostics: Health checks, path verification
+```
+
+**Via CLI batch file:**
+```bash
+ask.bat "FHitResult ImpactPoint ImpactNormal" --copy --dry-run --top-k 3
+```
+
 **Via Python script:**
 ```bash
 python src/core/hybrid_query.py "FHitResult members" --show-reasoning
@@ -219,14 +277,15 @@ python src/core/hybrid_query.py "how does collision detection work" --show-reaso
 python src/core/definition_extractor.py struct FHitResult
 ```
 
-**Via Windows batch file:**
+**Via Batch Processing (Phase 4):**
 ```bash
-ask.bat "FHitResult ImpactPoint ImpactNormal" --copy --dry-run --top-k 3
+python src/core/batch_query.py --input examples/sample_batch_queries.jsonl --output batch_results.jsonl
 ```
 
 **Via HTTP server (optional):**
 ```bash
-python src/server/retrieval_server.py
+tools\serve.bat
+# OR: python src/server/retrieval_server.py
 # Query: http://localhost:8008/query?q=FHitResult+members
 ```
 
@@ -400,14 +459,23 @@ python src/core/hybrid_query.py "your query" --show-reasoning --top-k 10
    - Logical compensation boosts help (3x file path match, 2.5x header priority)
    - Definition extraction provides fallback for precise queries
 
-## Deferred Enhancements
+## Current Status & Future Work
 
-See `DEFERRED_TASKS.md` for detailed specifications.
+**Current Status: Phase 5 Complete**
+- ✅ Phase 1: Core hybrid query system
+- ✅ Phase 2: Filter DSL and deployment infrastructure
+- ✅ Phase 3: Unified Dashboard GUI
+- ✅ Phase 4: Batch query processing
+- ✅ Phase 5: Relationship extraction
 
-**Planned after production validation (2-4 weeks):**
-1. Smart incremental cleanup for removed directories (15-45 min)
-2. Project-scope separate embedded store (2-3 hours)
-3. Query strategy auto-selection (1-2 hours)
+**Next Phase: Phase 6 - Environment Detection**
+See `docs/Development/ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md` for details.
+
+**Deferred Enhancements:**
+See `docs/_archive/planning/DEFERRED_TASKS.md` for older planned enhancements:
+1. Smart incremental cleanup for removed directories
+2. Project-scope separate embedded store
+3. Query strategy auto-selection
 
 ## Troubleshooting
 
@@ -548,8 +616,25 @@ refactor: simplify file discovery logic
 
 ## Additional Resources
 
-- **README.md**: User-facing documentation
-- **docs/HYBRID_QUERY_GUIDE.md**: Detailed query system guide
-- **docs/AUDIT_REPORT.md**: System performance audit
-- **docs/IMPROVEMENT_ROADMAP.md**: Enhancement timeline
-- **DEFERRED_TASKS.md**: Future planned enhancements
+### User Documentation (docs/Production/)
+- **README.md**: Main user guide
+- **PROJECT_STRUCTURE.md**: Complete file organization reference
+- **MAINTENANCE.md**: System maintenance procedures
+- **TROUBLESHOOTING.md**: Common issues and solutions
+- **UsageGuide/HYBRID_QUERY_GUIDE.md**: Detailed query system guide
+- **UsageGuide/AI_AGENT_GUIDE.md**: AI agent integration guide
+- **Deployment/DEPLOYMENT.md**: Deployment strategies
+- **Deployment/TEAM_SETUP.md**: Team onboarding guide
+- **GPU/GPU_SETUP.md**: GPU configuration guide
+- **GUI/GUI_TOOLS.md**: Unified Dashboard documentation
+
+### Development Documentation (docs/Development/)
+- **ProjectAudits/AUDIT_REPORT.md**: System performance audit
+- **ProjectAudits/INTEGRATION_AUDIT.md**: Phase 1-4 integration audit
+- **ProjectPlans/PHASE_5_RELATIONSHIP_EXTRACTION.md**: Phase 5 plan
+- **ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md**: Phase 6 plan
+
+### Archived Documentation (docs/_archive/)
+- **planning/DEFERRED_TASKS.md**: Older planned enhancements
+- **planning/IMPROVEMENT_ROADMAP.md**: Superseded enhancement timeline
+- **audits/**: Historical audit reports

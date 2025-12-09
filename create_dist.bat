@@ -28,11 +28,24 @@ copy "%SCRIPT_DIR%ask.bat" "%DIST_DIR%\" >nul
 copy "%SCRIPT_DIR%launcher.bat" "%DIST_DIR%\" >nul
 
 REM Copy directories (excluding large/temp files)
-robocopy "%SCRIPT_DIR%installer" "%DIST_DIR%\installer" /E >nul
-robocopy "%SCRIPT_DIR%src" "%DIST_DIR%\src" /E /XD __pycache__ >nul
-robocopy "%SCRIPT_DIR%config" "%DIST_DIR%\config" /E >nul
-robocopy "%SCRIPT_DIR%tools" "%DIST_DIR%\tools" /E >nul
-robocopy "%SCRIPT_DIR%docs" "%DIST_DIR%\docs" /E >nul
+REM Note: robocopy exit codes 0-7 are success, > 7 is error
+robocopy "%SCRIPT_DIR%installer" "%DIST_DIR%\installer" /E /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some installer files may not have copied
+
+robocopy "%SCRIPT_DIR%src" "%DIST_DIR%\src" /E /XD __pycache__ /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some src files may not have copied
+
+robocopy "%SCRIPT_DIR%config" "%DIST_DIR%\config" .gitkeep /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 mkdir "%DIST_DIR%\config"
+
+robocopy "%SCRIPT_DIR%tools" "%DIST_DIR%\tools" /E /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some tools files may not have copied
+
+robocopy "%SCRIPT_DIR%docs" "%DIST_DIR%\docs" /E /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some docs files may not have copied
+
+REM Reset error level (robocopy uses non-zero exit codes for success)
+(call )
 
 REM Create Zip (using temporary PowerShell script to avoid quoting issues)
 echo Zipping files...

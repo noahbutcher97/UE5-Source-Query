@@ -41,6 +41,15 @@ data/vector_cache.json
 # Configuration (Contains API Keys - NEVER COMMIT!)
 # ====================================================================
 config/.env
+config/detection_cache.json
+
+# ====================================================================
+# Temporary Build Files
+# ====================================================================
+dist_temp/
+*.zip
+_zip.ps1
+nul
 
 # ====================================================================
 # Machine-Specific Paths (Generated Locally)
