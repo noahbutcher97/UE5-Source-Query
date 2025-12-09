@@ -663,6 +663,23 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
         def detect():
             try:
+                # Check if target directory has a .uproject file with engine version
+                project_engine_version = None
+                target_dir = self.target_dir.get()
+                if target_dir:
+                    try:
+                        from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
+                        from pathlib import Path
+
+                        uproject = find_uproject_in_directory(Path(target_dir))
+                        if uproject:
+                            project_engine_version = get_engine_version_from_uproject(str(uproject))
+                            if project_engine_version:
+                                self.root.after(0, lambda v=project_engine_version, p=uproject.name:
+                                    self.log(f"Found project: {p} (Engine {v})"))
+                    except Exception:
+                        pass  # Silently skip if detection fails
+
                 # Use Phase 6 detection with validation and health scores
                 installations = get_available_engines(self.source_dir, use_cache=True)
 
@@ -671,8 +688,16 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     self.root.after(0, lambda: self.show_detection_help_dialog())
                     return
 
-                # Sort by health score (should already be sorted, but ensure)
-                installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
+                # Sort by:
+                # 1. Version match with project (if found)
+                # 2. Health score
+                def sort_key(inst):
+                    version_match_bonus = 1.0 if (project_engine_version and
+                                                   inst.get('version', '') == project_engine_version) else 0.0
+                    health_score = inst.get('health_score', 0)
+                    return (version_match_bonus, health_score)
+
+                installations.sort(key=sort_key, reverse=True)
 
                 # Log all found installations with health info
                 for inst in installations:
@@ -693,10 +718,16 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         warn_msg = "\n".join(warnings) if warnings else "Installation may be incomplete"
                         self.root.after(0, lambda w=warn_msg: self.log(f"⚠ Warning: {w}"))
 
+                    # Warn if version doesn't match project
+                    if project_engine_version and version != project_engine_version:
+                        self.root.after(0, lambda pv=project_engine_version, ev=version:
+                            self.log(f"⚠ Version mismatch: Project uses {pv}, selecting {ev}"))
+
                     self.root.after(0, lambda: self.engine_path.set(path))
                     self.root.after(0, lambda: self.log(f"✓ Selected {version} (health: {health}%)"))
                 else:
-                    self.root.after(0, lambda: self.show_version_selector(installations))
+                    self.root.after(0, lambda pv=project_engine_version:
+                        self.show_version_selector(installations, preferred_version=pv))
 
             except Exception as e:
                 self.root.after(0, lambda err=str(e): self.log(f"✗ Detection failed: {err}"))
@@ -791,7 +822,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         ttk.Button(button_frame, text="Close",
                    command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
 
-    def show_version_selector(self, installs):
+    def show_version_selector(self, installs, preferred_version=None):
         dialog = tk.Toplevel(self.root)
         dialog.title("Select UE5 Version")
         dialog.geometry("600x400")
@@ -803,7 +834,11 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         y = self.root.winfo_y() + (self.root.winfo_height() - 400) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        ttk.Label(dialog, text="Multiple UE5 versions found. Please select one:",
+        # Show preferred version if detected from .uproject
+        header_text = "Multiple UE5 versions found. Please select one:"
+        if preferred_version:
+            header_text += f"\n(Recommended: {preferred_version} - matches project)"
+        ttk.Label(dialog, text=header_text,
                   font=Theme.FONT_BOLD).pack(pady=10)
 
         # Create frame with scrollbar for installations

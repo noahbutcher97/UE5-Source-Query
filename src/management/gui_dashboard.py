@@ -412,6 +412,79 @@ class UnifiedDashboard:
         except Exception:
             pass  # Silently skip if config not available
 
+        # Project engine version (from .uproject file)
+        try:
+            from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
+
+            uproject = find_uproject_in_directory(self.script_dir)
+            if uproject:
+                project_version = get_engine_version_from_uproject(str(uproject))
+                if project_version:
+                    # Also get indexed engine version
+                    indexed_version = None
+                    config_file = self.script_dir / "config" / ".env"
+                    if config_file.exists():
+                        import re
+                        with open(config_file, 'r') as f:
+                            for line in f:
+                                line = line.strip()
+                                if line.startswith('UE_ENGINE_ROOT='):
+                                    engine_root = line.split('=', 1)[1].strip()
+                                    match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
+                                    if match:
+                                        indexed_version = match.group(1)
+                                    break
+
+                    # Create version display
+                    version_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
+                    version_frame.pack(fill=tk.X, pady=5)
+
+                    version_label = tk.Label(
+                        version_frame,
+                        text="Project Engine:",
+                        font=("Arial", 10, "bold"),
+                        bg=Theme.BG_LIGHT,
+                        fg=Theme.TEXT_DARK
+                    )
+                    version_label.pack(side=tk.LEFT, padx=(0, 10))
+
+                    # Check if versions match
+                    if indexed_version and project_version != indexed_version:
+                        # Version mismatch - show warning
+                        version_text = f"{project_version} (⚠️ Index built from {indexed_version})"
+                        version_color = "#F44336"  # Red
+                    else:
+                        # Versions match or no indexed version to compare
+                        version_text = project_version
+                        version_color = "#4CAF50"  # Green
+
+                    version_value = tk.Label(
+                        version_frame,
+                        text=version_text,
+                        font=("Arial", 9),
+                        bg=Theme.BG_LIGHT,
+                        fg=version_color
+                    )
+                    version_value.pack(side=tk.LEFT)
+
+                    # Add helpful tooltip/button for mismatch
+                    if indexed_version and project_version != indexed_version:
+                        warning_frame = tk.Frame(deploy_frame, bg="#FFF3CD", relief=tk.SOLID, bd=1)
+                        warning_frame.pack(fill=tk.X, pady=5, padx=5)
+
+                        warning_text = tk.Label(
+                            warning_frame,
+                            text=f"⚠️ Engine version mismatch detected. Consider rebuilding index with UE {project_version} source.",
+                            font=("Arial", 8),
+                            bg="#FFF3CD",
+                            fg="#856404",
+                            wraplength=500,
+                            justify=tk.LEFT
+                        )
+                        warning_text.pack(padx=10, pady=5)
+        except Exception:
+            pass  # Silently skip if detection fails
+
     def _build_dev_repo_status(self, parent_frame):
         """Build status section for dev repo environments"""
         deploy_frame = ttk.LabelFrame(parent_frame, text=" Tracked Deployments ", padding=15)

@@ -52,6 +52,47 @@ def validate_vector_store(verbose: bool = False) -> VectorStoreStatus:
 
     warnings = []
 
+    # Check for engine version mismatch with .uproject
+    try:
+        # Import engine helper functions
+        try:
+            from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
+        except ImportError:
+            from utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
+
+        # Look for .uproject file
+        uproject = find_uproject_in_directory(root)
+        if uproject:
+            project_version = get_engine_version_from_uproject(str(uproject))
+            if project_version:
+                # Read indexed engine version from config
+                config_file = root / "config" / ".env"
+                indexed_version = None
+                if config_file.exists():
+                    with open(config_file, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith('UE_ENGINE_ROOT='):
+                                engine_root = line.split('=', 1)[1].strip()
+                                # Extract version from path like "C:\Program Files\Epic Games\UE_5.3\Engine"
+                                import re
+                                match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
+                                if match:
+                                    indexed_version = match.group(1)
+                                break
+
+                # Compare versions
+                if indexed_version and project_version != indexed_version:
+                    warnings.append(
+                        f"Engine version mismatch: Project uses {project_version} but index built from {indexed_version}. "
+                        f"Consider rebuilding index with correct engine version."
+                    )
+                elif verbose and indexed_version:
+                    print(f"[INFO] Engine version match: {project_version} (project) == {indexed_version} (index)")
+    except Exception as e:
+        if verbose:
+            print(f"[DEBUG] Failed to check engine version: {e}")
+
     # Check existence
     if not vector_file.exists() and not meta_file.exists():
         return VectorStoreStatus(
