@@ -293,13 +293,13 @@ class UnifiedDashboard:
             )
             source_value.pack(side=tk.LEFT)
 
-            # Update buttons
+            # Update buttons - Row 1: Primary actions
             btn_frame = tk.Frame(update_frame, bg=Theme.BG_LIGHT)
             btn_frame.pack(fill=tk.X, pady=10)
 
             update_btn = tk.Button(
                 btn_frame,
-                text="Update Now",
+                text="🔄 Update Now (Smart)",
                 command=self.run_update,
                 bg=Theme.SECONDARY,
                 fg="white",
@@ -313,7 +313,7 @@ class UnifiedDashboard:
 
             check_btn = tk.Button(
                 btn_frame,
-                text="Check for Updates (Dry Run)",
+                text="🔍 Check for Updates",
                 command=lambda: self.run_update(dry_run=True),
                 bg=Theme.BG_DARK,
                 fg="white",
@@ -324,6 +324,63 @@ class UnifiedDashboard:
                 cursor="hand2"
             )
             check_btn.pack(side=tk.LEFT)
+
+            # Advanced options - Row 2: Source-specific updates
+            advanced_frame = tk.Frame(update_frame, bg=Theme.BG_LIGHT)
+            advanced_frame.pack(fill=tk.X, pady=(5, 0))
+
+            # Label for advanced options
+            adv_label = tk.Label(
+                advanced_frame,
+                text="Advanced:",
+                font=("Arial", 9, "italic"),
+                bg=Theme.BG_LIGHT,
+                fg="#7F8C8D"
+            )
+            adv_label.pack(side=tk.LEFT, padx=(0, 10))
+
+            # Force Local button (if local source available)
+            if update_source == "local" or "local" in str(self.deployment_detector.get_dev_repo_path() or ""):
+                local_btn = tk.Button(
+                    advanced_frame,
+                    text="📁 Force Local Dev",
+                    command=lambda: self.run_update(force_source="local"),
+                    bg="#4CAF50",
+                    fg="white",
+                    font=("Arial", 9),
+                    padx=12,
+                    pady=5,
+                    relief=tk.FLAT,
+                    cursor="hand2"
+                )
+                local_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # Force Remote button (if remote source available)
+            remote_btn = tk.Button(
+                advanced_frame,
+                text="🌐 Force Remote GitHub",
+                command=lambda: self.run_update(force_source="remote"),
+                bg="#2196F3",
+                fg="white",
+                font=("Arial", 9),
+                padx=12,
+                pady=5,
+                relief=tk.FLAT,
+                cursor="hand2"
+            )
+            remote_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # Help text
+            help_text = tk.Label(
+                update_frame,
+                text="💡 'Smart' auto-selects best source. Use 'Force' to override. Check first if unsure.",
+                font=("Arial", 8),
+                bg=Theme.BG_LIGHT,
+                fg="#7F8C8D",
+                wraplength=550,
+                justify=tk.LEFT
+            )
+            help_text.pack(pady=(5, 0))
         else:
             no_update_label = tk.Label(
                 update_frame,
@@ -579,59 +636,231 @@ class UnifiedDashboard:
             )
             no_deploy_label.pack(pady=20)
 
-    def run_update(self, dry_run=False):
-        """Run update process in background thread"""
+    def run_update(self, dry_run=False, force_source=None):
+        """
+        Run update process with comprehensive version checking and graceful fallback.
+
+        Args:
+            dry_run: If True, check for updates without applying
+            force_source: Force 'local' or 'remote' source (None = auto-detect)
+        """
+        def log(msg, tag=""):
+            """Thread-safe logging to status log"""
+            self.root.after(0, lambda: self._append_log(msg, tag))
+
+        def _append_log(msg, tag=""):
+            self.status_log.config(state=tk.NORMAL)
+            self.status_log.insert(tk.END, msg + "\n", tag)
+            self.status_log.see(tk.END)
+            self.status_log.config(state=tk.DISABLED)
+
         def update_thread():
             try:
-                # Import here to avoid circular dependency
+                # Import update utilities
                 try:
-                    from tools.update import UpdateManager
+                    from tools.update import UpdateManager, get_version, compare_versions
                 except ImportError:
                     import sys
                     sys.path.insert(0, str(self.script_dir / "tools"))
-                    from update import UpdateManager
+                    from update import UpdateManager, get_version, compare_versions
 
                 self.status_log.config(state=tk.NORMAL)
                 self.status_log.delete("1.0", tk.END)
+                self.status_log.config(state=tk.DISABLED)
 
                 if dry_run:
-                    self.status_log.insert(tk.END, "=== DRY RUN MODE ===\n")
+                    log("=" * 60)
+                    log("UPDATE CHECK MODE (No changes will be made)")
+                    log("=" * 60)
+                else:
+                    log("=" * 60)
+                    log("UPDATE SYSTEM")
+                    log("=" * 60)
+
+                # Get current version
+                current_version = get_version(self.script_dir)
+                log(f"\nCurrent version: {current_version or 'unknown'}")
 
                 manager = UpdateManager(self.script_dir)
 
-                # Load config
+                # Load config with graceful fallback
                 if not manager.load_config():
-                    self.status_log.insert(tk.END, "[ERROR] Failed to load deployment config\n")
-                    self.status_log.config(state=tk.DISABLED)
+                    log("[ERROR] Failed to load deployment config", "error")
+                    log("\nThis may not be a deployed installation.")
+                    log("Possible solutions:")
+                    log("  1. Run Setup.bat to configure deployment")
+                    log("  2. Use command line: python tools/update.py")
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Config Error",
+                        "Failed to load deployment config.\n\nPlease run Setup.bat to configure this installation."
+                    ))
                     return
 
-                # Detect source
-                source = manager.detect_update_source()
-                self.status_log.insert(tk.END, f"Update source: {source}\n\n")
+                # Try to detect all available sources
+                log("\nDetecting update sources...")
+                available_sources = []
 
-                # Run update
-                if source == "local":
-                    success = manager.update_from_local(dry_run=dry_run)
+                # Check local dev repo
+                local_repo = manager.config.get("update_sources", {}).get("local_dev_repo")
+                if local_repo:
+                    from pathlib import Path
+                    local_path = Path(local_repo)
+                    if local_path.exists() and (local_path / "src" / "__init__.py").exists():
+                        local_version = get_version(local_path)
+                        available_sources.append({
+                            'type': 'local',
+                            'path': str(local_path),
+                            'version': local_version or 'unknown'
+                        })
+                        log(f"  [LOCAL] {local_path}")
+                        log(f"          Version: {local_version or 'unknown'}")
+
+                # Check remote repo
+                remote_repo = manager.config.get("update_sources", {}).get("remote_repo")
+                if remote_repo:
+                    available_sources.append({
+                        'type': 'remote',
+                        'path': remote_repo,
+                        'version': 'latest'  # Can't easily check without cloning
+                    })
+                    log(f"  [REMOTE] {remote_repo}")
+                    log(f"           Version: latest (will check on pull)")
+
+                if not available_sources:
+                    log("\n[ERROR] No update sources configured!", "error")
+                    log("\nPlease configure update sources:")
+                    log("  1. Set local_dev_repo in deployment config")
+                    log("  2. Set remote_repo for GitHub updates")
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "No Sources",
+                        "No update sources configured.\n\nPlease update .ue5query_deploy.json with source paths."
+                    ))
+                    return
+
+                # Determine best source
+                if force_source:
+                    source = force_source
+                    log(f"\n[FORCE] Using {source} source (user override)")
                 else:
-                    success = manager.update_from_remote(dry_run=dry_run)
+                    source = manager.detect_update_source()
+                    log(f"\n[AUTO] Selected {source} source")
+
+                # Check for updates before applying
+                log("\nChecking for updates...")
+                try:
+                    update_info = manager.check_for_updates(source)
+
+                    if update_info:
+                        log(f"  Current: {update_info.get('current_version', 'unknown')}")
+                        log(f"  Source:  {update_info.get('source_version', 'unknown')}")
+
+                        if update_info.get('available'):
+                            log("\n  [!] Updates available")
+                        else:
+                            log("\n  [OK] Already up-to-date")
+                            if not dry_run:
+                                log("\nNo update needed. Use 'Force Update' to update anyway.")
+                            return
+                except Exception as e:
+                    log(f"[WARN] Version check failed: {e}", "warn")
+                    log("Continuing with update anyway...")
+
+                if dry_run:
+                    log("\n" + "=" * 60)
+                    log("DRY RUN COMPLETE - No changes made")
+                    log("=" * 60)
+                    log("\nClick 'Update Now' to apply updates.")
+                    return
+
+                # Perform update with fallback logic
+                log("\n" + "=" * 60)
+                log("APPLYING UPDATES")
+                log("=" * 60)
+
+                success = False
+                fallback_attempted = False
+
+                try:
+                    # Try primary source
+                    log(f"\nAttempting update from {source} source...")
+                    if source == "local":
+                        success = manager.update_from_local(dry_run=False)
+                    else:
+                        success = manager.update_from_remote(dry_run=False)
+
+                except Exception as e:
+                    log(f"[ERROR] Update from {source} failed: {e}", "error")
+
+                    # Graceful fallback to alternative source
+                    if source == "local" and len(available_sources) > 1:
+                        fallback_source = "remote"
+                        log(f"\n[FALLBACK] Attempting update from {fallback_source} source...")
+                        fallback_attempted = True
+                        try:
+                            success = manager.update_from_remote(dry_run=False)
+                        except Exception as e2:
+                            log(f"[ERROR] Fallback also failed: {e2}", "error")
+                    elif source == "remote" and len(available_sources) > 1:
+                        fallback_source = "local"
+                        log(f"\n[FALLBACK] Attempting update from {fallback_source} source...")
+                        fallback_attempted = True
+                        try:
+                            success = manager.update_from_local(dry_run=False)
+                        except Exception as e2:
+                            log(f"[ERROR] Fallback also failed: {e2}", "error")
 
                 if success:
-                    self.status_log.insert(tk.END, "\n[OK] Update completed successfully!\n")
-                    if not dry_run:
-                        messagebox.showinfo("Update Complete", "System updated successfully!")
+                    log("\n" + "=" * 60)
+                    log("[SUCCESS] Update completed!")
+                    log("=" * 60)
+
+                    if fallback_attempted:
+                        log("\nNote: Used fallback source after primary failed.")
+
+                    new_version = get_version(self.script_dir)
+                    log(f"\nNew version: {new_version or 'unknown'}")
+                    log("\nYou may need to restart the application for changes to take effect.")
+
+                    self.root.after(0, lambda: messagebox.showinfo(
+                        "Update Complete",
+                        f"System updated successfully!\n\nVersion: {new_version or 'unknown'}\n\nPlease restart the application."
+                    ))
                 else:
-                    self.status_log.insert(tk.END, "\n[ERROR] Update failed!\n")
-                    messagebox.showerror("Update Failed", "Update process failed. Check log for details.")
+                    log("\n" + "=" * 60)
+                    log("[FAILED] Update failed!")
+                    log("=" * 60)
+                    log("\nTroubleshooting:")
+                    log("  1. Check network connection (for remote updates)")
+                    log("  2. Verify dev repo path (for local updates)")
+                    log("  3. Try command line: python tools/update.py --help")
+                    log("  4. Check update log above for specific errors")
+
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Update Failed",
+                        "Update process failed.\n\nPlease check the log for details or try updating via command line."
+                    ))
 
             except Exception as e:
-                self.status_log.insert(tk.END, f"\n[ERROR] {str(e)}\n")
-                messagebox.showerror("Error", f"Update failed: {str(e)}")
-            finally:
-                self.status_log.config(state=tk.DISABLED)
+                log(f"\n[CRITICAL ERROR] {str(e)}", "error")
+                log("\nPlease report this error if it persists.")
+                import traceback
+                log(f"\nDetails:\n{traceback.format_exc()}")
+
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Critical Error",
+                    f"Unexpected error during update:\n\n{str(e)}\n\nPlease try updating via command line."
+                ))
 
         # Start update in background
         thread = threading.Thread(target=update_thread, daemon=True)
         thread.start()
+
+    def _append_log(self, msg, tag=""):
+        """Helper to append to status log (must be called from main thread)"""
+        self.status_log.config(state=tk.NORMAL)
+        self.status_log.insert(tk.END, msg + "\n", tag)
+        self.status_log.see(tk.END)
+        self.status_log.config(state=tk.DISABLED)
 
     def build_query_tab(self):
         frame = ttk.Frame(self.tab_query, padding=20)
