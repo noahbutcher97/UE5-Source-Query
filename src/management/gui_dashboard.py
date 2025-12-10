@@ -23,6 +23,7 @@ try:
     from src.utils.engine_helper import get_available_engines, resolve_uproject_source
     from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
     from src.utils.deployment_detector import DeploymentDetector, DeploymentRegistry
+    from src.utils import gui_helpers
     from src.core.hybrid_query import HybridQueryEngine
 except ImportError:
     from utils.gui_theme import Theme
@@ -31,6 +32,7 @@ except ImportError:
     from utils.engine_helper import get_available_engines, resolve_uproject_source
     from utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
     from utils.deployment_detector import DeploymentDetector, DeploymentRegistry
+    from utils import gui_helpers
     from core.hybrid_query import HybridQueryEngine
 
 class UnifiedDashboard:
@@ -76,33 +78,112 @@ class UnifiedDashboard:
 
         # Load engine path from source_manager after layout creation
         self._load_initial_engine_path()
-        
-    def _load_initial_engine_path(self):
-        """Auto-detect engine path using comprehensive detection"""
-        try:
-            # Use the engine_helper's comprehensive detection
-            engines = get_available_engines(self.script_dir)
-            if engines:
-                # Use the first detected engine
-                first_engine = engines[0]
-                engine_path = first_engine.get('path') or first_engine.get('root')
-                if engine_path:
-                    self.engine_path_var.set(str(engine_path))
-                    return
 
-            # Fallback: try to infer from EngineDirs.txt
-            engine_dirs = self.source_manager.get_engine_dirs()
-            if engine_dirs:
-                p = Path(engine_dirs[0])
-                if "Engine" in p.parts:
-                    idx = p.parts.index("Engine")
-                    self.engine_path_var.set(str(Path(*p.parts[:idx+1])))
-                    return
+        # Start periodic check for update notifications
+        self._start_update_check()
+
+    def _start_update_check(self):
+        """Start periodic polling for update restart marker"""
+        self._check_for_restart_marker()
+
+    def _check_for_restart_marker(self):
+        """Check if updates require a restart"""
+        marker_file = self.script_dir / ".needs_restart"
+
+        if marker_file.exists():
+            # Marker found - prompt user to restart
+            self._prompt_restart(marker_file)
+
+        # Schedule next check in 10 seconds
+        self.root.after(10000, self._check_for_restart_marker)
+
+    def _prompt_restart(self, marker_file):
+        """Show restart prompt dialog"""
+        try:
+            # Read timestamp from marker
+            update_time = marker_file.read_text().strip()
+
+            # Create prompt dialog
+            response = messagebox.askyesno(
+                "Updates Available",
+                f"Updates were pushed to this installation.\n\n{update_time}\n\nRestart dashboard to apply changes?",
+                icon='info'
+            )
+
+            if response:
+                # User chose to restart - delete marker and restart
+                marker_file.unlink(missing_ok=True)
+                self._restart_application()
+            else:
+                # User chose not to restart yet - delete marker to avoid repeated prompts
+                marker_file.unlink(missing_ok=True)
+                # Show reminder that they can manually restart later
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Restart Reminder",
+                    "You can restart the dashboard later to apply updates.\n\nChanges will take effect on next restart."
+                ))
+        except Exception as e:
+            print(f"[ERROR] Failed to handle restart marker: {e}")
+            marker_file.unlink(missing_ok=True)
+
+    def _restart_application(self):
+        """Restart the dashboard application"""
+        try:
+            import sys
+            import os
+
+            # Get current Python executable and script
+            python = sys.executable
+            script = sys.argv[0]
+
+            # Close current window
+            self.root.destroy()
+
+            # Restart application
+            os.execl(python, python, script, *sys.argv[1:])
+        except Exception as e:
+            messagebox.showerror(
+                "Restart Failed",
+                f"Failed to restart dashboard: {e}\n\nPlease restart manually."
+            )
+
+    def _load_initial_engine_path(self):
+        """Smart engine path detection with priority-based loading"""
+        try:
+            # Import smart detection
+            try:
+                from src.utils.engine_helper import get_smart_engine_path
+            except ImportError:
+                from utils.engine_helper import get_smart_engine_path
+
+            # Use smart detection
+            smart_result = get_smart_engine_path(self.script_dir)
+
+            if smart_result and smart_result.get('path'):
+                # Store detection metadata for display
+                self.engine_detection_source = smart_result.get('source', 'unknown')
+                self.engine_is_user_override = smart_result.get('is_user_override', False)
+
+                engine_path = smart_result['path']
+                self.engine_path_var.set(str(engine_path))
+
+                # If source is vector_store and differs from config, offer to update
+                if smart_result.get('source') == 'vector_store':
+                    config_path = self.config_manager.get('UE_ENGINE_ROOT', '')
+                    if config_path and config_path != engine_path:
+                        # Auto-update config to match vector store
+                        self.config_manager.set('UE_ENGINE_ROOT', engine_path)
+                        self.config_manager.save(self.config_manager._config)
+                return
 
             # No engine found
+            self.engine_detection_source = 'none'
+            self.engine_is_user_override = False
             self.engine_path_var.set("No UE5 engine detected - click Auto-Detect")
 
         except Exception as e:
+            self.engine_detection_source = 'error'
+            self.engine_is_user_override = False
             self.engine_path_var.set(f"Auto-detection failed: {str(e)}")
         
     def create_layout(self):
@@ -469,28 +550,42 @@ class UnifiedDashboard:
         except Exception:
             pass  # Silently skip if config not available
 
-        # Project engine version (from .uproject file)
+        # Project engine version (from .uproject file and smart detection)
         try:
-            from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
+            from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject, get_smart_engine_path, detect_engine_from_vector_store
 
             uproject = find_uproject_in_directory(self.script_dir)
             if uproject:
                 project_version = get_engine_version_from_uproject(str(uproject))
                 if project_version:
-                    # Also get indexed engine version
+                    # Use smart detection to get actual indexed version
                     indexed_version = None
-                    config_file = self.script_dir / "config" / ".env"
-                    if config_file.exists():
+                    detection_source = "config"
+
+                    # Try vector store first (most accurate)
+                    vector_engine = detect_engine_from_vector_store(self.script_dir)
+                    if vector_engine:
+                        version_str = vector_engine.get('version', '')
                         import re
-                        with open(config_file, 'r') as f:
-                            for line in f:
-                                line = line.strip()
-                                if line.startswith('UE_ENGINE_ROOT='):
-                                    engine_root = line.split('=', 1)[1].strip()
-                                    match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
-                                    if match:
-                                        indexed_version = match.group(1)
-                                    break
+                        match = re.search(r'(\d+\.\d+)', version_str)
+                        if match:
+                            indexed_version = match.group(1)
+                            detection_source = "vector_store"
+
+                    # Fallback to config if no vector store
+                    if not indexed_version:
+                        config_file = self.script_dir / "config" / ".env"
+                        if config_file.exists():
+                            import re
+                            with open(config_file, 'r') as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if line.startswith('UE_ENGINE_ROOT='):
+                                        engine_root = line.split('=', 1)[1].strip()
+                                        match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
+                                        if match:
+                                            indexed_version = match.group(1)
+                                        break
 
                     # Create version display
                     version_frame = tk.Frame(deploy_frame, bg=Theme.BG_LIGHT)
@@ -508,11 +603,15 @@ class UnifiedDashboard:
                     # Check if versions match
                     if indexed_version and project_version != indexed_version:
                         # Version mismatch - show warning
+                        source_label = "built index" if detection_source == "vector_store" else "config"
                         version_text = f"{project_version} (⚠️ Index built from {indexed_version})"
                         version_color = "#F44336"  # Red
                     else:
                         # Versions match or no indexed version to compare
-                        version_text = project_version
+                        if indexed_version:
+                            version_text = f"{project_version} ✓"
+                        else:
+                            version_text = project_version
                         version_color = "#4CAF50"  # Green
 
                     version_value = tk.Label(
@@ -781,12 +880,36 @@ class UnifiedDashboard:
                 fallback_attempted = False
 
                 try:
-                    # Try primary source
+                    # Try primary source using subprocess to capture output
                     log(f"\nAttempting update from {source} source...")
+
+                    # Use subprocess to run update and capture stdout
+                    import sys
+                    import subprocess
+
+                    update_script = self.script_dir / "tools" / "update.py"
+                    cmd = [sys.executable, str(update_script)]
+
+                    # Add appropriate flags based on source
                     if source == "local":
-                        success = manager.update_from_local(dry_run=False)
+                        cmd.extend(["--source", "local"])
                     else:
-                        success = manager.update_from_remote(dry_run=False)
+                        cmd.extend(["--source", "remote"])
+
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        cwd=str(self.script_dir)
+                    )
+
+                    # Stream output to log
+                    for line in process.stdout:
+                        self.root.after(0, lambda l=line: log(l.rstrip()))
+
+                    process.wait()
+                    success = process.returncode == 0
 
                 except Exception as e:
                     log(f"[ERROR] Update from {source} failed: {e}", "error")
@@ -819,12 +942,28 @@ class UnifiedDashboard:
 
                     new_version = get_version(self.script_dir)
                     log(f"\nNew version: {new_version or 'unknown'}")
-                    log("\nYou may need to restart the application for changes to take effect.")
+                    log("\n⚠️ IMPORTANT: Python cache cleared - restart required for changes to load")
 
-                    self.root.after(0, lambda: messagebox.showinfo(
-                        "Update Complete",
-                        f"System updated successfully!\n\nVersion: {new_version or 'unknown'}\n\nPlease restart the application."
-                    ))
+                    # Prompt user to restart
+                    def prompt_restart():
+                        response = messagebox.askyesno(
+                            "Update Complete - Restart Required",
+                            f"System updated successfully!\n\n"
+                            f"Version: {new_version or 'unknown'}\n\n"
+                            f"Python cache has been cleared.\n"
+                            f"Would you like to restart the application now?\n\n"
+                            f"(Changes won't take effect until restart)",
+                            icon='info'
+                        )
+                        if response:
+                            # Restart the GUI
+                            import sys
+                            import os
+                            python = sys.executable
+                            script = str(self.script_dir / "src" / "management" / "gui_dashboard.py")
+                            os.execl(python, python, script)
+
+                    self.root.after(0, prompt_restart)
                 else:
                     log("\n" + "=" * 60)
                     log("[FAILED] Update failed!")
@@ -1663,6 +1802,18 @@ class UnifiedDashboard:
         ttk.Button(path_entry_frame, text="Browse...", command=self.browse_engine_path).pack(side=tk.LEFT)
         ttk.Button(path_entry_frame, text="Auto-Detect", command=self.auto_detect_path).pack(side=tk.LEFT)
 
+        # Source indicator
+        self.engine_source_label = tk.Label(
+            path_frame,
+            text="",
+            font=("Arial", 8),
+            fg="#666",
+            bg=Theme.BG_LIGHT,
+            anchor=tk.W
+        )
+        self.engine_source_label.pack(fill=tk.X, pady=(5, 0))
+        self._update_engine_source_indicator()
+
         # Model Selection Section
         model_frame = ttk.LabelFrame(frame, text=" Model Settings ", padding=15)
         model_frame.pack(fill=tk.X, pady=(0, 15))
@@ -1723,20 +1874,24 @@ class UnifiedDashboard:
         self.config_log_text.config(state=tk.DISABLED)
 
     def load_current_engine_path(self):
-        engine_dirs = self.source_manager.get_engine_dirs()
-        if engine_dirs:
-            # Try to extract the root from EngineDirs.txt
+        """Load engine path from config file, not from EngineDirs.txt"""
+        config_file = self.script_dir / "config" / ".env"
+
+        if config_file.exists():
             try:
-                p = Path(engine_dirs[0])
-                if "Engine" in p.parts:
-                    idx = p.parts.index("Engine")
-                    self.engine_path_var.set(str(Path(*p.parts[:idx+1])))
-                else:
-                    self.engine_path_var.set(engine_dirs[0].split('Source')[0].rstrip('\\/')) # Best guess
+                with open(config_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('UE_ENGINE_ROOT='):
+                            engine_root = line.split('=', 1)[1].strip()
+                            self.engine_path_var.set(engine_root)
+                            return
             except Exception as e:
-                self.engine_path_var.set("Error loading path: " + str(e))
-        else:
-            self.engine_path_var.set("Not detected. Run auto-detect.")
+                self.engine_path_var.set(f"Error reading config: {e}")
+                return
+
+        # Fallback: try to auto-detect
+        self.engine_path_var.set("Not detected. Run auto-detect.")
 
     def test_configuration(self):
         """Comprehensive configuration validation with auto-detection and user guidance"""
@@ -1930,90 +2085,42 @@ class UnifiedDashboard:
 
         threading.Thread(target=detect, daemon=True).start()
 
+    def _update_engine_source_indicator(self):
+        """Update the visual indicator showing where the engine path came from"""
+        if not hasattr(self, 'engine_source_label'):
+            return
+
+        source = getattr(self, 'engine_detection_source', 'unknown')
+        is_override = getattr(self, 'engine_is_user_override', False)
+
+        source_messages = {
+            'vector_store': '📊 Detected from built index (vector store)',
+            'uproject': '🎮 Detected from project file (.uproject)',
+            'config': '⚙️ Loaded from configuration file',
+            'auto_detect': '🔍 Auto-detected from system',
+            'user_override': '👤 User override (manually set)',
+            'none': '⚠️  No engine detected',
+            'error': '❌ Detection error',
+            'unknown': ''
+        }
+
+        message = source_messages.get(source, '')
+
+        if is_override:
+            message = '👤 User override (manually set)'
+            self.engine_source_label.config(fg='#0066CC')  # Blue for override
+        elif source == 'vector_store':
+            self.engine_source_label.config(fg='#228B22')  # Green for vector store
+        elif source in ['none', 'error']:
+            self.engine_source_label.config(fg='#CC0000')  # Red for errors
+        else:
+            self.engine_source_label.config(fg='#666666')  # Grey for others
+
+        self.engine_source_label.config(text=message)
+
     def show_detection_help_dialog(self):
         """Phase 6: Guide user through manual setup when detection fails"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("UE5 Engine Not Found - Setup Help")
-        dialog.geometry("700x500")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        # Title
-        title_frame = ttk.Frame(dialog)
-        title_frame.pack(fill=tk.X, padx=20, pady=10)
-        ttk.Label(title_frame, text="No UE5 installation detected automatically",
-                  font=Theme.FONT_BOLD).pack()
-
-        # Help text with scrollbar
-        text_frame = ttk.Frame(dialog)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        scrollbar = ttk.Scrollbar(text_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        help_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
-                            font=Theme.FONT_NORMAL, relief=tk.FLAT, bg="#f0f0f0")
-        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=help_text.yview)
-
-        help_content = """To help us find your UE5 engine installation, try one of these methods:
-
-1. SET ENVIRONMENT VARIABLE (Recommended)
-
-   Set one of these environment variables:
-   • UE5_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
-   • UE_ROOT = C:\\Path\\To\\UE_5.3\\Engine
-   • UNREAL_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
-
-   Then restart this application.
-
-2. CREATE .ue5query CONFIG FILE
-
-   Create a file named .ue5query in your project root or home directory:
-
-   {
-     "engine": {
-       "path": "C:/Path/To/UE_5.3/Engine",
-       "version": "5.3.2"
-     }
-   }
-
-3. INSTALL IN STANDARD LOCATION
-
-   Ensure UE5 is installed in one of these standard locations:
-   • C:\\Program Files\\Epic Games\\UE_5.X
-   • D:\\Program Files\\Epic Games\\UE_5.X
-   • C:\\Epic Games\\UE_5.X
-   • D:\\Epic Games\\UE_5.X
-
-4. USE EPIC GAMES LAUNCHER
-
-   Install UE5 via Epic Games Launcher. It will be automatically
-   registered in Windows Registry for detection.
-
-5. BROWSE MANUALLY (Below)
-
-   Click 'Browse Manually' to select your engine directory directly.
-"""
-
-        help_text.insert("1.0", help_content)
-        help_text.config(state=tk.DISABLED)
-
-        # Button frame
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        ttk.Button(button_frame, text="Browse Manually",
-                   command=lambda: [dialog.destroy(), self.browse_engine_path()],
-                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(button_frame, text="Close",
-                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+        gui_helpers.show_engine_detection_help(self.root, self.browse_engine_path)
 
     def show_selection_dialog(self, installations):
         dialog = tk.Toplevel(self.root)

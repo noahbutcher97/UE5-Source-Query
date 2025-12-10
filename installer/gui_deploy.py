@@ -25,6 +25,7 @@ from src.utils.source_manager import SourceManager
 from src.utils.engine_helper import get_available_engines, resolve_uproject_source
 from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
 from src.utils.cuda_installer import install_cuda_with_progress, create_gpu_requirements_file
+from src.utils import gui_helpers
 
 class DeploymentWizard:
     def __init__(self, root):
@@ -739,88 +740,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
     def show_detection_help_dialog(self):
         """Phase 6: Guide user through manual setup when detection fails"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("UE5 Engine Not Found - Setup Help")
-        dialog.geometry("700x500")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        # Title
-        title_frame = ttk.Frame(dialog)
-        title_frame.pack(fill=tk.X, padx=20, pady=10)
-        ttk.Label(title_frame, text="No UE5 installation detected automatically",
-                  font=Theme.FONT_BOLD).pack()
-
-        # Help text with scrollbar
-        text_frame = ttk.Frame(dialog)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        scrollbar = ttk.Scrollbar(text_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        help_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
-                            font=Theme.FONT_NORMAL, relief=tk.FLAT, bg="#f0f0f0")
-        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=help_text.yview)
-
-        help_content = """To help us find your UE5 engine installation, try one of these methods:
-
-1. SET ENVIRONMENT VARIABLE (Recommended)
-
-   Set one of these environment variables:
-   • UE5_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
-   • UE_ROOT = C:\\Path\\To\\UE_5.3\\Engine
-   • UNREAL_ENGINE_PATH = C:\\Path\\To\\UE_5.3\\Engine
-
-   Then restart this application.
-
-2. CREATE .ue5query CONFIG FILE
-
-   Create a file named .ue5query in your project root or home directory:
-
-   {
-     "engine": {
-       "path": "C:/Path/To/UE_5.3/Engine",
-       "version": "5.3.2"
-     }
-   }
-
-3. INSTALL IN STANDARD LOCATION
-
-   Ensure UE5 is installed in one of these standard locations:
-   • C:\\Program Files\\Epic Games\\UE_5.X
-   • D:\\Program Files\\Epic Games\\UE_5.X
-   • C:\\Epic Games\\UE_5.X
-   • D:\\Epic Games\\UE_5.X
-
-4. USE EPIC GAMES LAUNCHER
-
-   Install UE5 via Epic Games Launcher. It will be automatically
-   registered in Windows Registry for detection.
-
-5. BROWSE MANUALLY (Below)
-
-   Click 'Browse Manually' to select your engine directory directly.
-"""
-
-        help_text.insert("1.0", help_content)
-        help_text.config(state=tk.DISABLED)
-
-        # Button frame
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        ttk.Button(button_frame, text="Browse Manually",
-                   command=lambda: [dialog.destroy(), self.browse_engine()],
-                   style="Accent.TButton").pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(button_frame, text="Close",
-                   command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+        gui_helpers.show_engine_detection_help(self.root, self.browse_engine_path)
 
     def show_version_selector(self, installs, preferred_version=None):
         dialog = tk.Toplevel(self.root)
