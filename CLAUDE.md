@@ -468,6 +468,34 @@ python src/core/hybrid_query.py "your query" --show-reasoning --top-k 10
 - ✅ Phase 4: Batch query processing
 - ✅ Phase 5: Relationship extraction
 
+**🎯 ACTIVE TASK: GUI Feature Parity (Phases B & C)**
+
+**Status:** Ready to begin (15 hours estimated)
+**Quick Start:** See `docs/Development/NEXT_SESSION_QUICKSTART.md`
+**Full Plan:** See plan file `lively-foraging-minsky.md` in Claude's plan directory
+
+**What's Complete:**
+- ✅ Phase A: Shared GUI Infrastructure (6/6 tasks)
+- ✅ Phase D: Distribution Optimization (6/6 tasks)
+- ✅ Bug fixes and testing complete
+- ✅ All changes committed and pushed
+
+**What's Next:**
+- ⏸️ Phase B: Deployment Wizard Enhancements (0/4 tasks, 8.5h)
+  1. Priority-based engine detection
+  2. Health score display in version selector
+  3. Version mismatch warnings
+  4. SourceManager integration
+- ⏸️ Phase C: Unified Dashboard Enhancements (0/3 tasks, 6.5h)
+  1. Progress bars for long operations
+  2. Configuration preview
+  3. CUDA setup button
+
+**To Continue:**
+Tell Claude: "Continue with Phase B from NEXT_SESSION_QUICKSTART.md"
+
+---
+
 **Next Phase: Phase 6 - Environment Detection**
 See `docs/Development/ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md` for details.
 
