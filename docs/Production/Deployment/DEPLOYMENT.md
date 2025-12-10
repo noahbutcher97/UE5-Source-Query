@@ -327,6 +327,50 @@ This automatically:
 - Regenerates `EngineDirs.txt` with correct paths
 - Preserves the same directory structure (just updates root path)
 
+## Distribution Strategy
+
+### Files Included in Deployments
+
+**Core System** (always ships):
+- `src/core/` - Query engine
+- `src/indexing/` - Embedding builder (Python only, PowerShell deprecated)
+- `src/utils/` - Utilities and helpers
+- `src/management/` - GUI Dashboard
+- `installer/` - Deployment wizard (enables re-deployment)
+- `tools/` - Maintenance scripts
+- `tests/` - Validation suite
+- `docs/Production/` - User documentation
+- `examples/` - Sample queries
+
+**Excluded from Deployments** (dev-only):
+- `src/research/` - Debug and benchmark tools
+- `docs/Development/` - Architecture and planning docs
+- `docs/_archive/` - Historical documentation
+- `CLAUDE.md`, `GEMINI.md` - AI assistant development guides
+- Deprecated PowerShell indexer files (`BuildSourceIndex.ps1`, `BuildSourceIndexAdmin.bat`)
+
+### Why This Matters
+
+Lean deployments reduce:
+- **Confusion** - Users don't see irrelevant dev tools
+- **Disk usage** - Save ~525KB per deployment
+- **Update time** - Fewer files to sync
+- **Support burden** - Clearer what's production vs dev
+
+### Automatic Cleanup
+
+The update system automatically removes dev-only files during updates:
+- When updating from dev repo → deployment, dev files are excluded
+- When updating from remote GitHub → deployment, only production files are pulled
+- The `clean_dev_files()` function runs automatically to remove any stray dev files
+
+If you need to manually clean a deployment:
+```python
+from pathlib import Path
+from tools.update import clean_dev_files
+clean_dev_files(Path("D:\\UnrealProjects\\5.3\\your_project\\Scripts"))
+```
+
 ## Best Practices
 
 1. **Share Vector Index**: Build once, commit `data/` directory to git LFS or shared storage

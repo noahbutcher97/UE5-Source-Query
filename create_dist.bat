@@ -19,30 +19,45 @@ if exist "%DIST_NAME%.zip" del "%DIST_NAME%.zip"
 
 mkdir "%DIST_DIR%"
 
-REM Copy core files
+REM Copy core files (excluding dev-only guides)
 copy "%SCRIPT_DIR%Setup.bat" "%DIST_DIR%\" >nul
 copy "%SCRIPT_DIR%requirements.txt" "%DIST_DIR%\" >nul
-copy "%SCRIPT_DIR%requirements-gpu.txt" "%DIST_DIR%\" >nul
+copy "%SCRIPT_DIR%requirements-gpu.txt" "%DIST_DIR%\" >nul 2>nul
 copy "%SCRIPT_DIR%README.md" "%DIST_DIR%\" >nul
 copy "%SCRIPT_DIR%ask.bat" "%DIST_DIR%\" >nul
 copy "%SCRIPT_DIR%launcher.bat" "%DIST_DIR%\" >nul
+copy "%SCRIPT_DIR%update.bat" "%DIST_DIR%\" >nul
+copy "%SCRIPT_DIR%.indexignore" "%DIST_DIR%\" >nul
+REM Explicitly skip CLAUDE.md and GEMINI.md (dev-only AI guides)
 
-REM Copy directories (excluding large/temp files)
+REM Copy directories (excluding dev-only files and temp files)
 REM Note: robocopy exit codes 0-7 are success, > 7 is error
+
 robocopy "%SCRIPT_DIR%installer" "%DIST_DIR%\installer" /E /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 echo Warning: Some installer files may not have copied
 
-robocopy "%SCRIPT_DIR%src" "%DIST_DIR%\src" /E /XD __pycache__ /NFL /NDL /NJH /NJS
+REM Copy src (excluding research and deprecated PowerShell indexer)
+robocopy "%SCRIPT_DIR%src" "%DIST_DIR%\src" /E /XD research __pycache__ /XF BuildSourceIndex.ps1 BuildSourceIndexAdmin.bat /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 echo Warning: Some src files may not have copied
 
-robocopy "%SCRIPT_DIR%config" "%DIST_DIR%\config" .gitkeep /NFL /NDL /NJH /NJS
+robocopy "%SCRIPT_DIR%config" "%DIST_DIR%\config" .gitkeep /NFL /NDL /NJH /NJS 2>nul
 if %ERRORLEVEL% GEQ 8 mkdir "%DIST_DIR%\config"
 
-robocopy "%SCRIPT_DIR%tools" "%DIST_DIR%\tools" /E /NFL /NDL /NJH /NJS
+REM Copy tools (excluding git-lfs setup)
+robocopy "%SCRIPT_DIR%tools" "%DIST_DIR%\tools" /E /XF setup-git-lfs.bat /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 echo Warning: Some tools files may not have copied
 
-robocopy "%SCRIPT_DIR%docs" "%DIST_DIR%\docs" /E /NFL /NDL /NJH /NJS
+REM Copy production docs only (exclude Development and _archive)
+robocopy "%SCRIPT_DIR%docs\Production" "%DIST_DIR%\docs\Production" /E /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 echo Warning: Some docs files may not have copied
+
+REM Copy tests (excluding dev artifacts)
+robocopy "%SCRIPT_DIR%tests" "%DIST_DIR%\tests" /E /XF DEPLOYMENT_TEST_RESULTS.md /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some test files may not have copied
+
+REM Copy examples
+robocopy "%SCRIPT_DIR%examples" "%DIST_DIR%\examples" /E /NFL /NDL /NJH /NJS 2>nul
+if %ERRORLEVEL% GEQ 8 echo Note: Examples directory not found (optional)
 
 REM Reset error level (robocopy uses non-zero exit codes for success)
 (call )

@@ -46,6 +46,94 @@ DEFAULT_EXCLUDES = [
     "Thumbs.db"
 ]
 
+# Deployment exclusion patterns (dev-only files that should not ship to deployments)
+DEPLOYMENT_EXCLUDES = [
+    # Research/debug tools
+    "src/research",
+    "src/research/**",
+
+    # Dev-only documentation
+    "docs/Development",
+    "docs/Development/**",
+    "docs/_archive",
+    "docs/_archive/**",
+
+    # Deprecated code
+    "src/indexing/BuildSourceIndex.ps1",
+    "src/indexing/BuildSourceIndexAdmin.bat",
+
+    # Dev test artifacts
+    "tests/DEPLOYMENT_TEST_RESULTS.md",
+
+    # Dev collaboration tools
+    "tools/setup-git-lfs.bat",
+
+    # Dev-only AI guides
+    "CLAUDE.md",
+    "GEMINI.md",
+]
+
+def clean_dev_files(deployment_root: Path):
+    """Remove dev-only files from existing deployment."""
+    dev_files = [
+        "src/research",
+        "docs/Development",
+        "docs/_archive",
+        "src/indexing/BuildSourceIndex.ps1",
+        "src/indexing/BuildSourceIndexAdmin.bat",
+        "CLAUDE.md",
+        "GEMINI.md",
+        "tools/setup-git-lfs.bat",
+        "tests/DEPLOYMENT_TEST_RESULTS.md",
+    ]
+
+    print("[CLEANUP] Removing dev-only files from deployment...")
+    removed_count = 0
+
+    for file_path in dev_files:
+        full_path = deployment_root / file_path
+        try:
+            if full_path.is_dir():
+                shutil.rmtree(full_path, ignore_errors=True)
+                print(f"  [OK] Removed dev directory: {file_path}")
+                removed_count += 1
+            elif full_path.is_file():
+                full_path.unlink(missing_ok=True)
+                print(f"  [OK] Removed dev file: {file_path}")
+                removed_count += 1
+        except Exception as e:
+            print(f"  [WARN] Could not remove {file_path}: {e}")
+
+    if removed_count > 0:
+        print(f"[OK] Cleaned {removed_count} dev files/directories")
+    else:
+        print("[OK] No dev files found (deployment already clean)")
+
+def clear_python_cache(root_dir: Path):
+    """Clear all Python cache files (.pyc, __pycache__) to ensure new code loads"""
+    print("[CACHE] Clearing Python cache files...")
+    count = 0
+
+    # Remove __pycache__ directories
+    for pycache_dir in root_dir.rglob("__pycache__"):
+        try:
+            shutil.rmtree(pycache_dir)
+            count += 1
+        except Exception:
+            pass  # Ignore errors, some might be in use
+
+    # Remove .pyc files
+    for pyc_file in root_dir.rglob("*.pyc"):
+        try:
+            pyc_file.unlink()
+            count += 1
+        except Exception:
+            pass
+
+    if count > 0:
+        print(f"[OK] Cleared {count} cache files/directories")
+    return count
+
 # Files to preserve (never overwrite)
 PRESERVE_FILES = [
     "data/vector_store.npz",
@@ -238,7 +326,7 @@ class UpdateManager:
             self.backup_dir.mkdir(parents=True, exist_ok=False)
 
             # Backup critical directories
-            for dir_name in ["src", "installer", "tools"]:
+            for dir_name in ["src", "installer", "tools", "tests"]:
                 src_dir = self.deployment_root / dir_name
                 if src_dir.exists():
                     shutil.copytree(src_dir, self.backup_dir / dir_name)
@@ -263,10 +351,13 @@ class UpdateManager:
             print(f"[ERROR] Invalid dev repo: {local_repo}")
             return False
 
-        # Directories to sync
-        sync_dirs = ["src", "installer", "tools", "docs"]
+        # Clean dev-only files from deployment before updating
+        clean_dev_files(self.deployment_root)
 
-        exclude_patterns = DEFAULT_EXCLUDES + self.config.get("exclude_patterns", [])
+        # Directories to sync
+        sync_dirs = ["src", "installer", "tools", "tests", "docs", "examples"]
+
+        exclude_patterns = DEFAULT_EXCLUDES + DEPLOYMENT_EXCLUDES + self.config.get("exclude_patterns", [])
 
         if dry_run:
             print("\n[CHECK] DRY RUN - Would update:")
@@ -317,6 +408,19 @@ class UpdateManager:
             # Update deployment config
             self._update_deployment_info("local", local_repo)
 
+            # Clear Python cache to ensure new code loads
+            print()
+            clear_python_cache(self.deployment_root)
+
+            # Create restart marker for running GUIs
+            marker_file = self.deployment_root / ".needs_restart"
+            try:
+                from datetime import datetime
+                marker_file.write_text(f"Updated at {datetime.now().isoformat()}")
+                print("[NOTIFY] Created restart marker for running GUIs")
+            except Exception as e:
+                print(f"[WARN] Could not create restart marker: {e}")
+
             print("\n[OK] Local update completed successfully!")
             return True
 
@@ -354,13 +458,16 @@ class UpdateManager:
                 capture_output=True
             )
 
+            # Clean dev-only files from deployment before updating
+            clean_dev_files(self.deployment_root)
+
             # Create backup
             if not self.create_backup():
                 return False
 
             # Copy files from temp to deployment
             print("[UPDATE] Installing update...")
-            for dir_name in ["src", "installer", "tools", "docs"]:
+            for dir_name in ["src", "installer", "tools", "tests", "docs", "examples"]:
                 src_dir = temp_dir / dir_name
                 dst_dir = self.deployment_root / dir_name
 
@@ -375,6 +482,19 @@ class UpdateManager:
 
             # Update deployment config
             self._update_deployment_info("remote", remote_repo)
+
+            # Clear Python cache to ensure new code loads
+            print()
+            clear_python_cache(self.deployment_root)
+
+            # Create restart marker for running GUIs
+            marker_file = self.deployment_root / ".needs_restart"
+            try:
+                from datetime import datetime
+                marker_file.write_text(f"Updated at {datetime.now().isoformat()}")
+                print("[NOTIFY] Created restart marker for running GUIs")
+            except Exception as e:
+                print(f"[WARN] Could not create restart marker: {e}")
 
             # Cleanup temp directory
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -442,7 +562,7 @@ class UpdateManager:
         try:
             print(f"[ROLLBACK]  Rolling back from: {self.backup_dir}")
 
-            for dir_name in ["src", "installer", "tools"]:
+            for dir_name in ["src", "installer", "tools", "tests", "examples"]:
                 backup_src = self.backup_dir / dir_name
                 if backup_src.exists():
                     dest = self.deployment_root / dir_name
@@ -488,13 +608,14 @@ class UpdateManager:
 
         return result
 
-    def push_to_deployment(self, target_path: Path, dry_run: bool = False) -> bool:
+    def push_to_deployment(self, target_path: Path, dry_run: bool = False, force: bool = False) -> bool:
         """
         Push updates from dev repo to a single deployment.
 
         Args:
             target_path: Path to deployment directory
             dry_run: If True, only show what would be updated
+            force: If True, push even if versions are same (incremental update)
 
         Returns:
             True if successful
@@ -511,13 +632,15 @@ class UpdateManager:
         print(f"  Source: {source_version or 'unknown'}")
         print(f"  Target: {target_version or 'unknown'}")
 
-        if source_version and target_version:
+        if source_version and target_version and not force:
             comparison = compare_versions(source_version, target_version)
             if comparison == 0:
-                print(f"  [SKIP] Already up-to-date")
+                print(f"  [SKIP] Already up-to-date (use --force for incremental push)")
                 return True
             elif comparison < 0:
                 print(f"  [WARN] Target is newer than source!")
+        elif force and source_version == target_version:
+            print(f"  [FORCE] Incremental push (same version)")
 
         if dry_run:
             print(f"  [DRY-RUN] Would update files")
@@ -531,9 +654,13 @@ class UpdateManager:
         # Use local update method
         return temp_manager.update_from_local(dry_run=False)
 
-    def push_to_all_deployments(self, dry_run: bool = False) -> int:
+    def push_to_all_deployments(self, dry_run: bool = False, force: bool = False) -> int:
         """
         Push updates from dev repo to ALL tracked deployments.
+
+        Args:
+            dry_run: If True, only show what would be updated
+            force: If True, push even if versions are same (incremental update)
 
         Returns:
             Number of deployments successfully updated
@@ -564,7 +691,7 @@ class UpdateManager:
         for deploy_id, deploy_info in deployments_dict.items():
             deploy_path = Path(deploy_info['path'])
             if deploy_path.exists():
-                if self.push_to_deployment(deploy_path, dry_run):
+                if self.push_to_deployment(deploy_path, dry_run, force):
                     success_count += 1
             else:
                 print(f"[WARN] Deployment not found: {deploy_path}")
@@ -658,12 +785,12 @@ Examples:
         manager = UpdateManager(current_root)  # Dummy manager for push methods
 
         if args.push_all:
-            success_count = manager.push_to_all_deployments(dry_run=args.dry_run)
+            success_count = manager.push_to_all_deployments(dry_run=args.dry_run, force=args.force)
             return 0 if success_count > 0 else 1
 
         elif args.push:
             target_path = Path(args.push).resolve()
-            success = manager.push_to_deployment(target_path, dry_run=args.dry_run)
+            success = manager.push_to_deployment(target_path, dry_run=args.dry_run, force=args.force)
             return 0 if success else 1
 
     # === PULL MODE (Deployed Repo ← Source) ===
