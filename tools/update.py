@@ -387,11 +387,26 @@ class UpdateManager:
                 if dst_dir.exists():
                     self._safe_remove_dir(dst_dir)
 
+                # Filter exclusion patterns for this directory
+                # Convert "src/research" → "research" when syncing src/
+                dir_specific_patterns = []
+                for pattern in exclude_patterns:
+                    if "/" in pattern or "\\" in pattern:
+                        # Path-based pattern - check if it applies to this directory
+                        norm_pattern = pattern.replace("\\", "/")
+                        if norm_pattern.startswith(f"{dir_name}/"):
+                            # Strip directory prefix: "src/research" → "research"
+                            relative_pattern = norm_pattern[len(dir_name)+1:]
+                            dir_specific_patterns.append(relative_pattern)
+                    else:
+                        # Simple filename pattern - apply to all directories
+                        dir_specific_patterns.append(pattern)
+
                 # Copy new version
                 shutil.copytree(
                     src_dir,
                     dst_dir,
-                    ignore=shutil.ignore_patterns(*exclude_patterns)
+                    ignore=shutil.ignore_patterns(*dir_specific_patterns) if dir_specific_patterns else None
                 )
 
             # Copy root files
@@ -467,6 +482,8 @@ class UpdateManager:
 
             # Copy files from temp to deployment
             print("[UPDATE] Installing update...")
+            exclude_patterns = DEFAULT_EXCLUDES + DEPLOYMENT_EXCLUDES + self.config.get("exclude_patterns", [])
+
             for dir_name in ["src", "installer", "tools", "tests", "docs", "examples"]:
                 src_dir = temp_dir / dir_name
                 dst_dir = self.deployment_root / dir_name
@@ -474,7 +491,27 @@ class UpdateManager:
                 if src_dir.exists():
                     if dst_dir.exists():
                         self._safe_remove_dir(dst_dir)
-                    shutil.copytree(src_dir, dst_dir, ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES))
+
+                    # Filter exclusion patterns for this directory
+                    # Convert "src/research" → "research" when syncing src/
+                    dir_specific_patterns = []
+                    for pattern in exclude_patterns:
+                        if "/" in pattern or "\\" in pattern:
+                            # Path-based pattern - check if it applies to this directory
+                            norm_pattern = pattern.replace("\\", "/")
+                            if norm_pattern.startswith(f"{dir_name}/"):
+                                # Strip directory prefix: "src/research" → "research"
+                                relative_pattern = norm_pattern[len(dir_name)+1:]
+                                dir_specific_patterns.append(relative_pattern)
+                        else:
+                            # Simple filename pattern - apply to all directories
+                            dir_specific_patterns.append(pattern)
+
+                    shutil.copytree(
+                        src_dir,
+                        dst_dir,
+                        ignore=shutil.ignore_patterns(*dir_specific_patterns) if dir_specific_patterns else None
+                    )
                     print(f"[OK] Updated {dir_name}/")
 
             # Restore preserved files
