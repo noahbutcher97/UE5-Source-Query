@@ -1008,30 +1008,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 # Sort by health score (descending)
                 installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
 
-                if len(installations) == 1:
-                    install = installations[0]
-                    path = install['engine_root']
-                    version = install['version']
-                    health = int(install.get('health_score', 0) * 100)
-
-                    # Warn if health is low
-                    if health < 70:
-                        warnings = install.get('warnings', [])
-                        warn_msg = "\n".join(warnings) if warnings else "Installation may be incomplete"
-                        self.root.after(0, lambda w=warn_msg: self.log(f"⚠ Warning: {w}"))
-
-                    # Warn if version doesn't match project
-                    if project_engine_version and project_engine_version not in version:
-                        self.root.after(0, lambda pv=project_engine_version, ev=version:
-                            self.log(f"⚠ Version mismatch: Project uses {pv}, selecting {ev}"))
-
-                    self.root.after(0, lambda p=path: self.engine_path.set(p))
-                    self.root.after(0, lambda v=version, h=health:
-                        self.log(f"✓ Selected {v} (health: {h}%)"))
-                else:
-                    # Multiple installations - show selector
-                    self.root.after(0, lambda pv=project_engine_version:
-                        self.show_version_selector(installations, preferred_version=pv))
+                # Always show version selector so user can override auto-selection
+                # The selector includes "Auto" as the default which picks the best match
+                self.root.after(0, lambda pv=project_engine_version:
+                    self.show_version_selector(installations, preferred_version=pv))
 
             except Exception as e:
                 self.root.after(0, lambda err=str(e): self.log(f"✗ Detection failed: {err}"))
@@ -1116,7 +1096,26 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Add installations with health indicators
+        # Add "Auto" as first option - selects best match automatically
+        # Determine best auto-select choice
+        best_install = installs[0]  # Already sorted by health
+        if preferred_version:
+            # Prefer version matching project if available
+            for inst in installs:
+                if preferred_version in inst.get('version', ''):
+                    best_install = inst
+                    break
+
+        best_health = int(best_install.get('health_score', 0) * 100)
+        auto_desc = f"Best: {best_install.get('version', 'unknown')} ({best_health}%)"
+        tree.insert("", tk.END, iid="auto", values=(
+            "Auto (Recommended)",
+            auto_desc,
+            "Smart Detection",
+            "● Auto-select"
+        ))
+
+        # Add individual installations
         for i, inst in enumerate(installs):
             version = inst.get('version', 'unknown')
             health = int(inst.get('health_score', 0) * 100)
@@ -1143,6 +1142,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 source.replace('_', ' ').title(),
                 status
             ))
+
+        # Select "Auto" by default
+        tree.selection_set("auto")
+        tree.focus("auto")
 
         # Detail panel
         detail_frame = ttk.LabelFrame(dialog, text=" Installation Details ", padding=10)
@@ -1179,28 +1182,46 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         def on_tree_select(event):
             selection = tree.selection()
             if selection:
-                index = int(selection[0])
-                selected = installs[index]
-                path_var.set(selected.get('engine_root', 'N/A'))
-
-                health = int(selected.get('health_score', 0) * 100)
-                color = update_health_color(health)
-                health_indicator_label.config(text=f"Health: {health}%", fg=color)
-
-                # Show warnings if any
-                warnings = selected.get('warnings', [])
-                if warnings:
-                    warnings_var.set(f"⚠ {' | '.join(warnings)}")
+                sel_id = selection[0]
+                if sel_id == "auto":
+                    # Auto selection - show best install details
+                    path_var.set(f"Auto → {best_install.get('engine_root', 'N/A')}")
+                    health = int(best_install.get('health_score', 0) * 100)
+                    color = update_health_color(health)
+                    health_indicator_label.config(text=f"Health: {health}%", fg=color)
+                    warnings_var.set("Will automatically select the best available engine")
                 else:
-                    warnings_var.set("")
+                    index = int(sel_id)
+                    selected = installs[index]
+                    path_var.set(selected.get('engine_root', 'N/A'))
+
+                    health = int(selected.get('health_score', 0) * 100)
+                    color = update_health_color(health)
+                    health_indicator_label.config(text=f"Health: {health}%", fg=color)
+
+                    # Show warnings if any
+                    warnings = selected.get('warnings', [])
+                    if warnings:
+                        warnings_var.set(f"⚠ {' | '.join(warnings)}")
+                    else:
+                        warnings_var.set("")
 
         tree.bind('<<TreeviewSelect>>', on_tree_select)
+
+        # Trigger initial selection display for "auto"
+        on_tree_select(None)
 
         def on_select():
             selection = tree.selection()
             if selection:
-                index = int(selection[0])
-                selected = installs[index]
+                sel_id = selection[0]
+                if sel_id == "auto":
+                    # Use best install
+                    selected = best_install
+                else:
+                    index = int(sel_id)
+                    selected = installs[index]
+
                 health = int(selected.get('health_score', 0) * 100)
                 self.engine_path.set(selected['engine_root'])
                 self.log(f"✓ Selected {selected['version']} (health: {health}%)")
