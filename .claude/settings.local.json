@@ -6,7 +6,9 @@
       "Bash(\".venv\\Scripts\\python.exe\" src/utils/verify_vector_store.py --verbose)",
       "Bash(\".venv\\Scripts\\python.exe\":*)",
       "Bash(\".venv\\Scripts\\python.exe\" tools/update.py --help)",
-      "Bash(\".venv\\Scripts\\python.exe\" tools/update.py --push-all --dry-run)"
+      "Bash(\".venv\\Scripts\\python.exe\" tools/update.py --push-all --dry-run)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(.venvScriptspython.exe -c \"from installer.gui_deploy import DeploymentWizard; print(''Import successful'')\")"
     ],
     "deny": [],
     "ask": []

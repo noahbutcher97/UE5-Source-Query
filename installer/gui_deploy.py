@@ -22,7 +22,10 @@ sys.path.append(str(SCRIPT_DIR))
 from src.utils.gui_theme import Theme
 from src.utils.config_manager import ConfigManager
 from src.utils.source_manager import SourceManager
-from src.utils.engine_helper import get_available_engines, resolve_uproject_source
+from src.utils.engine_helper import (
+    get_available_engines, resolve_uproject_source, get_smart_engine_path,
+    find_uproject_in_directory, get_engine_version_from_uproject, detect_engine_from_vector_store
+)
 from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
 from src.utils.cuda_installer import install_cuda_with_progress, create_gpu_requirements_file
 from src.utils import gui_helpers
@@ -370,21 +373,117 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
     def build_execute_tab(self):
         frame = ttk.Frame(self.tab_execute, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Configuration Preview Panel (NEW)
+        self.preview_frame = ttk.LabelFrame(frame, text=" Configuration Preview ", padding=10)
+        self.preview_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Preview content - collapsible area
+        self.preview_content = ttk.Frame(self.preview_frame)
+        self.preview_content.pack(fill=tk.X)
+
+        # Create preview labels
+        self.preview_labels = {}
+        preview_items = [
+            ("target", "Target Directory:"),
+            ("engine", "Engine Path:"),
+            ("engine_dirs", "Source Directories:"),
+            ("project_dirs", "Project Directories:"),
+            ("gpu", "GPU Support:"),
+        ]
+
+        for i, (key, label) in enumerate(preview_items):
+            ttk.Label(self.preview_content, text=label, font=Theme.FONT_BOLD).grid(
+                row=i, column=0, sticky=tk.W, padx=(0, 10), pady=2)
+            self.preview_labels[key] = ttk.Label(
+                self.preview_content, text="Not configured", font=Theme.FONT_NORMAL, foreground="gray")
+            self.preview_labels[key].grid(row=i, column=1, sticky=tk.W, pady=2)
+
+        # Refresh button
+        ttk.Button(self.preview_frame, text="🔄 Refresh Preview",
+                   command=self.update_config_preview).pack(pady=(10, 0))
+
+        # Action buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=(0, 20))
-        
+
         self.btn_install = ttk.Button(btn_frame, text="▶ Start Installation", command=self.start_install, style="Accent.TButton")
         self.btn_install.pack(side=tk.LEFT, padx=5)
-        
+
         self.btn_cancel = ttk.Button(btn_frame, text="Close", command=self.cancel_or_close)
         self.btn_cancel.pack(side=tk.LEFT, padx=5)
-        
+
         self.progress = ttk.Progressbar(frame, mode='determinate')
         self.progress.pack(fill=tk.X, pady=(0, 10))
-        
+
         self.log_text = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, height=15)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Initial preview update
+        self.root.after(500, self.update_config_preview)
+
+    def update_config_preview(self):
+        """Update the configuration preview panel with current settings."""
+        # Target directory
+        target = self.target_dir.get()
+        if target:
+            self.preview_labels["target"].config(text=target, foreground=Theme.SUCCESS)
+        else:
+            self.preview_labels["target"].config(text="Not set", foreground=Theme.ERROR)
+
+        # Engine path
+        engine = self.engine_path.get()
+        if engine:
+            if Path(engine).exists():
+                # Extract version from path
+                import re
+                match = re.search(r'UE[_-]?(\d+\.\d+)', engine)
+                version = f"UE {match.group(1)}" if match else "Unknown version"
+                self.preview_labels["engine"].config(
+                    text=f"{version} - {engine[:50]}...",
+                    foreground=Theme.SUCCESS)
+            else:
+                self.preview_labels["engine"].config(
+                    text=f"⚠ Path not found: {engine[:40]}...",
+                    foreground=Theme.ERROR)
+        else:
+            self.preview_labels["engine"].config(text="Not configured", foreground=Theme.ERROR)
+
+        # Source directories count
+        engine_count = len(self.engine_dirs)
+        if engine_count > 0:
+            self.preview_labels["engine_dirs"].config(
+                text=f"{engine_count} directories configured",
+                foreground=Theme.SUCCESS)
+        else:
+            self.preview_labels["engine_dirs"].config(
+                text="No source directories",
+                foreground="#FFC107")
+
+        # Project directories
+        project_count = len(self.project_dirs)
+        single_project = self.project_path.get()
+        total_projects = project_count + (1 if single_project else 0)
+
+        if total_projects > 0:
+            self.preview_labels["project_dirs"].config(
+                text=f"{total_projects} project(s) configured",
+                foreground=Theme.SUCCESS)
+        else:
+            self.preview_labels["project_dirs"].config(
+                text="No projects (optional)",
+                foreground="gray")
+
+        # GPU support
+        if self.gpu_support.get():
+            gpu_name = self.gpu_info.get('gpu_name', 'Unknown') if self.gpu_info else 'Detecting...'
+            self.preview_labels["gpu"].config(
+                text=f"✓ Enabled ({gpu_name})",
+                foreground=Theme.SUCCESS)
+        else:
+            self.preview_labels["gpu"].config(
+                text="Disabled (CPU only)",
+                foreground="gray")
 
     def toggle_api_visibility(self):
         if self.api_key_entry['show'] == '*':
@@ -509,20 +608,36 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
     def build_diagnostics_tab(self):
         frame = ttk.Frame(self.tab_diag, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
-        
+        self.diag_frame = frame  # Store reference for dynamic layout
+
+        # Version Mismatch Warning Banner (initially hidden)
+        self.version_warning_frame = tk.Frame(frame, bg="#FFF3CD", relief=tk.SOLID, bd=1)
+        # Don't pack yet - will be shown dynamically if mismatch detected
+
+        self.version_warning_text = tk.Label(
+            self.version_warning_frame,
+            text="",
+            font=("Arial", 9),
+            bg="#FFF3CD",
+            fg="#856404",
+            wraplength=700,
+            justify=tk.LEFT
+        )
+        self.version_warning_text.pack(padx=10, pady=8)
+
         # Action Bar
-        action_frame = ttk.Frame(frame)
-        action_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(action_frame, text="Pre-flight System Check", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
-        
-        btn_run = ttk.Button(action_frame, text="▶ Run Checks", command=self.run_diagnostics, style="Accent.TButton")
+        self.diag_action_frame = ttk.Frame(frame)
+        self.diag_action_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(self.diag_action_frame, text="Pre-flight System Check", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
+
+        btn_run = ttk.Button(self.diag_action_frame, text="▶ Run Checks", command=self.run_diagnostics, style="Accent.TButton")
         btn_run.pack(side=tk.RIGHT)
-        
+
         # Output Area
         self.diag_log = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, state=tk.DISABLED)
         self.diag_log.pack(fill=tk.BOTH, expand=True)
-        
+
         self.log_diag("Ready to check system requirements.\nClick 'Run Checks' to begin.")
 
     def log_diag(self, message, clear=False, append=False):
@@ -535,10 +650,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
 
     def run_diagnostics(self):
         self.log_diag("Running pre-flight checks...", clear=True)
-        
+
+        # Hide version warning initially
+        self.root.after(0, lambda: self.version_warning_frame.pack_forget())
+
         def _check():
             all_passed = True
-            
+            version_warnings = []
+
             # 1. Python Check
             try:
                 ver = sys.version_info
@@ -618,12 +737,103 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             except:
                 pass
 
+            # 6. Engine Version Mismatch Check (NEW)
+            self.root.after(0, lambda: self.log_diag("\n--- Engine Version Validation ---", append=True))
+            try:
+                target_dir = Path(self.target_dir.get()) if self.target_dir.get() else None
+                selected_engine = self.engine_path.get()
+
+                # Extract version from selected engine path
+                import re
+                selected_version = None
+                if selected_engine:
+                    match = re.search(r'UE[_-]?(\d+\.\d+)', selected_engine)
+                    if match:
+                        selected_version = match.group(1)
+                        self.root.after(0, lambda v=selected_version:
+                            self.log_diag(f"[INFO] Selected Engine: UE {v}", append=True))
+
+                # Check .uproject file version
+                project_version = None
+                if target_dir:
+                    uproject = find_uproject_in_directory(target_dir)
+                    if uproject:
+                        project_version = get_engine_version_from_uproject(str(uproject))
+                        if project_version:
+                            self.root.after(0, lambda p=uproject.name, v=project_version:
+                                self.log_diag(f"[INFO] Project: {p} requires UE {v}", append=True))
+
+                # Check vector store version (if exists)
+                vector_version = None
+                if target_dir and (target_dir / "data" / "vector_meta.json").exists():
+                    vector_engine = detect_engine_from_vector_store(target_dir)
+                    if vector_engine:
+                        vector_version = vector_engine.get('version', '')
+                        # Extract just the version number
+                        match = re.search(r'(\d+\.\d+)', vector_version)
+                        if match:
+                            vector_version = match.group(1)
+                            self.root.after(0, lambda v=vector_version:
+                                self.log_diag(f"[INFO] Existing Index: Built with UE {v}", append=True))
+
+                # Compare versions and detect mismatches
+                versions = {
+                    'Selected Engine': selected_version,
+                    'Project (.uproject)': project_version,
+                    'Existing Index': vector_version
+                }
+
+                # Filter out None values
+                present_versions = {k: v for k, v in versions.items() if v}
+
+                if len(present_versions) >= 2:
+                    # Check if all versions match
+                    unique_versions = set(present_versions.values())
+                    if len(unique_versions) > 1:
+                        # Version mismatch detected!
+                        mismatch_details = ", ".join([f"{k}: {v}" for k, v in present_versions.items()])
+                        version_warnings.append(f"Version mismatch detected! {mismatch_details}")
+
+                        self.root.after(0, lambda m=mismatch_details:
+                            self.log_diag(f"[WARN] VERSION MISMATCH: {m}", append=True))
+
+                        # Specific warnings
+                        if selected_version and project_version and selected_version != project_version:
+                            version_warnings.append(
+                                f"Selected engine (UE {selected_version}) doesn't match project requirement (UE {project_version})")
+
+                        if selected_version and vector_version and selected_version != vector_version:
+                            version_warnings.append(
+                                f"Selected engine (UE {selected_version}) differs from existing index (UE {vector_version}). "
+                                "Consider rebuilding index after installation.")
+                    else:
+                        self.root.after(0, lambda: self.log_diag("[OK] All engine versions are consistent", append=True))
+                elif len(present_versions) == 1:
+                    self.root.after(0, lambda: self.log_diag("[INFO] Only one version source available, cannot cross-check", append=True))
+                else:
+                    self.root.after(0, lambda: self.log_diag("[INFO] No engine version information available", append=True))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_diag(f"[ERR] Version check failed: {err}", append=True))
+
+            # Show version warning banner if mismatches detected
+            if version_warnings:
+                warning_text = "⚠️ " + " | ".join(version_warnings)
+                self.root.after(0, lambda t=warning_text: self._show_version_warning(t))
+
             if all_passed:
                 self.root.after(0, lambda: self.log_diag("\n[SUCCESS] All checks passed. Ready to install.", append=True))
             else:
                 self.root.after(0, lambda: self.log_diag("\n[WARNING] Some checks failed. Installation may not work.", append=True))
 
         threading.Thread(target=_check, daemon=True).start()
+
+    def _show_version_warning(self, warning_text):
+        """Show the version mismatch warning banner."""
+        self.version_warning_text.config(text=warning_text)
+        # Pack after the action bar but before the log
+        if not self.version_warning_frame.winfo_ismapped():
+            self.version_warning_frame.pack(fill=tk.X, pady=(0, 10), after=self.diag_action_frame)
 
     def add_uproject(self):
         f = filedialog.askopenfilename(filetypes=[("Unreal Project", "*.uproject")])
@@ -659,53 +869,144 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             self.project_listbox.insert(tk.END, p)
 
     def auto_detect_engine(self):
-        self.log("Detecting UE5 installations...")
+        """
+        Priority-based engine detection:
+        1. Vector store (if index exists) - ensures consistency
+        2. .uproject file in target/deployment area - matches project
+        3. Config file (if exists) - user's last choice
+        4. Auto-detection by health score - best available
+
+        This mirrors the Dashboard's get_smart_engine_path() logic.
+        """
+        self.log("Detecting UE5 installations (priority-based)...")
         self.path_entry.config(state=tk.DISABLED)
 
         def detect():
             try:
-                # Check if target directory has a .uproject file with engine version
+                target_dir = Path(self.target_dir.get()) if self.target_dir.get() else None
+
+                # ═══════════════════════════════════════════════════════════════════
+                # PRIORITY 1: Vector Store (if deployment has existing index)
+                # ═══════════════════════════════════════════════════════════════════
+                if target_dir and (target_dir / "data" / "vector_meta.json").exists():
+                    self.root.after(0, lambda: self.log("  [1/4] Checking vector store..."))
+                    vector_engine = detect_engine_from_vector_store(target_dir)
+                    if vector_engine:
+                        path = vector_engine.get('engine_root')
+                        version = vector_engine.get('version', 'unknown')
+                        if path and Path(path).exists():
+                            self.root.after(0, lambda p=path, v=version:
+                                self.log(f"✓ Found from vector store: {v}"))
+                            self.root.after(0, lambda: self.log("  (Using indexed engine for consistency)"))
+                            self.root.after(0, lambda p=path: self.engine_path.set(p))
+                            return
+                        else:
+                            self.root.after(0, lambda: self.log("  Vector store points to missing path, continuing..."))
+                else:
+                    self.root.after(0, lambda: self.log("  [1/4] No vector store found"))
+
+                # ═══════════════════════════════════════════════════════════════════
+                # PRIORITY 2: .uproject file in deployment area
+                # ═══════════════════════════════════════════════════════════════════
+                self.root.after(0, lambda: self.log("  [2/4] Checking for .uproject..."))
                 project_engine_version = None
-                target_dir = self.target_dir.get()
+                uproject = None
+
                 if target_dir:
+                    uproject = find_uproject_in_directory(target_dir)
+                    if uproject:
+                        project_engine_version = get_engine_version_from_uproject(str(uproject))
+                        if project_engine_version:
+                            self.root.after(0, lambda p=uproject.name, v=project_engine_version:
+                                self.log(f"  Found project: {p} (requires UE {v})"))
+
+                # ═══════════════════════════════════════════════════════════════════
+                # PRIORITY 3: Config file (user's previous selection)
+                # ═══════════════════════════════════════════════════════════════════
+                self.root.after(0, lambda: self.log("  [3/4] Checking config file..."))
+                config_engine = None
+                config_file = target_dir / "config" / ".env" if target_dir else None
+
+                if config_file and config_file.exists():
                     try:
-                        from src.utils.engine_helper import find_uproject_in_directory, get_engine_version_from_uproject
-                        from pathlib import Path
-
-                        uproject = find_uproject_in_directory(Path(target_dir))
-                        if uproject:
-                            project_engine_version = get_engine_version_from_uproject(str(uproject))
-                            if project_engine_version:
-                                self.root.after(0, lambda v=project_engine_version, p=uproject.name:
-                                    self.log(f"Found project: {p} (Engine {v})"))
+                        import re
+                        with open(config_file, 'r') as f:
+                            for line in f:
+                                if line.startswith('UE_ENGINE_ROOT='):
+                                    engine_root = line.split('=', 1)[1].strip()
+                                    if engine_root and Path(engine_root).exists():
+                                        match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
+                                        if match:
+                                            config_engine = {
+                                                'path': engine_root,
+                                                'version': f"UE_{match.group(1)}",
+                                                'source': 'config'
+                                            }
+                                            self.root.after(0, lambda v=config_engine['version']:
+                                                self.log(f"  Found in config: {v}"))
+                                    break
                     except Exception:
-                        pass  # Silently skip if detection fails
+                        pass
 
-                # Use Phase 6 detection with validation and health scores
+                # ═══════════════════════════════════════════════════════════════════
+                # PRIORITY 4: Auto-detection with health scores
+                # ═══════════════════════════════════════════════════════════════════
+                self.root.after(0, lambda: self.log("  [4/4] Scanning system for UE5 installations..."))
                 installations = get_available_engines(self.source_dir, use_cache=True)
 
                 if not installations:
+                    # No engines found anywhere
+                    if config_engine:
+                        # But we have a config entry - use it
+                        self.root.after(0, lambda p=config_engine['path']: self.engine_path.set(p))
+                        self.root.after(0, lambda v=config_engine['version']:
+                            self.log(f"✓ Using config engine: {v}"))
+                        return
+
                     self.root.after(0, lambda: self.log("! No UE5 installation detected"))
                     self.root.after(0, lambda: self.show_detection_help_dialog())
                     return
 
-                # Sort by:
-                # 1. Version match with project (if found)
-                # 2. Health score
-                def sort_key(inst):
-                    version_match_bonus = 1.0 if (project_engine_version and
-                                                   inst.get('version', '') == project_engine_version) else 0.0
-                    health_score = inst.get('health_score', 0)
-                    return (version_match_bonus, health_score)
-
-                installations.sort(key=sort_key, reverse=True)
-
-                # Log all found installations with health info
+                # Log all found installations
                 for inst in installations:
                     health_pct = int(inst.get('health_score', 0) * 100)
                     source = inst.get('source', 'unknown')
                     self.root.after(0, lambda v=inst['version'], s=source, h=health_pct:
                         self.log(f"  Found {v} ({s}) - Health: {h}%"))
+
+                # ═══════════════════════════════════════════════════════════════════
+                # DECISION LOGIC: Choose best engine
+                # ═══════════════════════════════════════════════════════════════════
+
+                # If we have a project version, prefer matching engine
+                if project_engine_version:
+                    for inst in installations:
+                        if project_engine_version in inst.get('version', ''):
+                            path = inst['engine_root']
+                            version = inst['version']
+                            health = int(inst.get('health_score', 0) * 100)
+                            self.root.after(0, lambda p=path: self.engine_path.set(p))
+                            self.root.after(0, lambda v=version, h=health:
+                                self.log(f"✓ Selected {v} (matches project, health: {h}%)"))
+                            return
+
+                    # No matching version found - warn user
+                    self.root.after(0, lambda v=project_engine_version:
+                        self.log(f"⚠ No engine matching project version {v}"))
+
+                # If we have a config engine and it's in the list with good health, prefer it
+                if config_engine:
+                    for inst in installations:
+                        if inst['engine_root'] == config_engine['path']:
+                            health = int(inst.get('health_score', 0) * 100)
+                            if health >= 60:
+                                self.root.after(0, lambda p=config_engine['path']: self.engine_path.set(p))
+                                self.root.after(0, lambda v=config_engine['version'], h=health:
+                                    self.log(f"✓ Using config engine: {v} (health: {h}%)"))
+                                return
+
+                # Sort by health score (descending)
+                installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
 
                 if len(installations) == 1:
                     install = installations[0]
@@ -720,13 +1021,15 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         self.root.after(0, lambda w=warn_msg: self.log(f"⚠ Warning: {w}"))
 
                     # Warn if version doesn't match project
-                    if project_engine_version and version != project_engine_version:
+                    if project_engine_version and project_engine_version not in version:
                         self.root.after(0, lambda pv=project_engine_version, ev=version:
                             self.log(f"⚠ Version mismatch: Project uses {pv}, selecting {ev}"))
 
-                    self.root.after(0, lambda: self.engine_path.set(path))
-                    self.root.after(0, lambda: self.log(f"✓ Selected {version} (health: {health}%)"))
+                    self.root.after(0, lambda p=path: self.engine_path.set(p))
+                    self.root.after(0, lambda v=version, h=health:
+                        self.log(f"✓ Selected {v} (health: {h}%)"))
                 else:
+                    # Multiple installations - show selector
                     self.root.after(0, lambda pv=project_engine_version:
                         self.show_version_selector(installations, preferred_version=pv))
 
@@ -743,64 +1046,161 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         gui_helpers.show_engine_detection_help(self.root, self.browse_engine_path)
 
     def show_version_selector(self, installs, preferred_version=None):
+        """
+        Show version selector dialog with color-coded health scores.
+        Enhanced to provide better visual feedback on engine quality.
+        """
         dialog = tk.Toplevel(self.root)
         dialog.title("Select UE5 Version")
-        dialog.geometry("600x400")
+        dialog.geometry("700x500")
         dialog.transient(self.root)
         dialog.grab_set()
 
         self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 600) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 400) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        # Show preferred version if detected from .uproject
-        header_text = "Multiple UE5 versions found. Please select one:"
+        # Header with recommendation if available
+        header_frame = ttk.Frame(dialog)
+        header_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Label(header_frame, text="Select UE5 Installation",
+                  font=Theme.FONT_BOLD).pack(anchor=tk.W)
+
         if preferred_version:
-            header_text += f"\n(Recommended: {preferred_version} - matches project)"
-        ttk.Label(dialog, text=header_text,
-                  font=Theme.FONT_BOLD).pack(pady=10)
+            rec_frame = tk.Frame(header_frame, bg="#d4edda", relief=tk.SOLID, bd=1)
+            rec_frame.pack(fill=tk.X, pady=(5, 0))
+            tk.Label(rec_frame, text=f"💡 Recommended: UE {preferred_version} (matches project)",
+                     font=("Arial", 9), bg="#d4edda", fg="#155724").pack(padx=10, pady=5)
 
-        # Create frame with scrollbar for installations
-        frame = ttk.Frame(dialog)
-        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        # Legend for health scores
+        legend_frame = ttk.LabelFrame(dialog, text=" Health Score Legend ", padding=5)
+        legend_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
-        scrollbar = ttk.Scrollbar(frame)
+        legend_row = ttk.Frame(legend_frame)
+        legend_row.pack(fill=tk.X)
+
+        for color, label, range_text in [
+            ("#28a745", "Excellent", "80-100%"),
+            ("#ffc107", "Good", "60-79%"),
+            ("#fd7e14", "Fair", "40-59%"),
+            ("#dc3545", "Poor", "0-39%"),
+        ]:
+            item_frame = tk.Frame(legend_row, bg="white")
+            item_frame.pack(side=tk.LEFT, padx=10)
+            tk.Label(item_frame, text="●", fg=color, font=("Arial", 12), bg="white").pack(side=tk.LEFT)
+            tk.Label(item_frame, text=f" {label} ({range_text})", font=("Arial", 9), bg="white").pack(side=tk.LEFT)
+
+        # Main content - use Treeview for better display
+        tree_frame = ttk.Frame(dialog)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        # Create Treeview with columns
+        columns = ("version", "health", "source", "status")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+
+        tree.heading("version", text="Version")
+        tree.heading("health", text="Health")
+        tree.heading("source", text="Source")
+        tree.heading("status", text="Status")
+
+        tree.column("version", width=100)
+        tree.column("health", width=100)
+        tree.column("source", width=120)
+        tree.column("status", width=150)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Use Listbox with detailed info
-        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=Theme.FONT_NORMAL,
-                             selectmode=tk.SINGLE)
-        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=listbox.yview)
-
-        # Add installations with health scores
-        for inst in installs:
-            version = inst['version']
-            source = inst.get('source', 'unknown')
+        # Add installations with health indicators
+        for i, inst in enumerate(installs):
+            version = inst.get('version', 'unknown')
             health = int(inst.get('health_score', 0) * 100)
-            path = inst['engine_root']
+            source = inst.get('source', 'unknown')
+            path = inst.get('engine_root', '')
 
-            display = f"{version} | Health: {health}% | Source: {source}"
-            listbox.insert(tk.END, display)
+            # Determine health status text
+            if health >= 80:
+                status = "● Excellent"
+            elif health >= 60:
+                status = "● Good"
+            elif health >= 40:
+                status = "● Fair"
+            else:
+                status = "● Poor"
 
-        # Info label for selected installation
-        info_label = ttk.Label(dialog, text="", font=Theme.FONT_SMALL, foreground="gray")
-        info_label.pack(pady=5)
+            # Check if this matches preferred version
+            is_recommended = preferred_version and preferred_version in version
+            version_display = f"{version} ✓" if is_recommended else version
 
-        def on_listbox_select(event):
-            selection = listbox.curselection()
+            tree.insert("", tk.END, iid=str(i), values=(
+                version_display,
+                f"{health}%",
+                source.replace('_', ' ').title(),
+                status
+            ))
+
+        # Detail panel
+        detail_frame = ttk.LabelFrame(dialog, text=" Installation Details ", padding=10)
+        detail_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        path_var = tk.StringVar(value="Select an installation to see details")
+        warnings_var = tk.StringVar(value="")
+
+        ttk.Label(detail_frame, text="Path:", font=Theme.FONT_BOLD).grid(row=0, column=0, sticky=tk.W)
+        path_label = ttk.Label(detail_frame, textvariable=path_var, font=Theme.FONT_NORMAL, wraplength=600)
+        path_label.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+
+        warnings_label = ttk.Label(detail_frame, textvariable=warnings_var, font=Theme.FONT_NORMAL,
+                                   foreground="#856404", wraplength=600)
+        warnings_label.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+
+        # Health score indicator using shared utility
+        health_frame = ttk.Frame(detail_frame)
+        health_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+
+        health_indicator_label = tk.Label(health_frame, text="Health: --", font=Theme.FONT_BOLD)
+        health_indicator_label.pack(side=tk.LEFT)
+
+        def update_health_color(health):
+            if health >= 80:
+                return "#28a745"
+            elif health >= 60:
+                return "#ffc107"
+            elif health >= 40:
+                return "#fd7e14"
+            else:
+                return "#dc3545"
+
+        def on_tree_select(event):
+            selection = tree.selection()
             if selection:
-                index = selection[0]
+                index = int(selection[0])
                 selected = installs[index]
-                info_label.config(text=f"Path: {selected['engine_root']}")
+                path_var.set(selected.get('engine_root', 'N/A'))
 
-        listbox.bind('<<ListboxSelect>>', on_listbox_select)
+                health = int(selected.get('health_score', 0) * 100)
+                color = update_health_color(health)
+                health_indicator_label.config(text=f"Health: {health}%", fg=color)
+
+                # Show warnings if any
+                warnings = selected.get('warnings', [])
+                if warnings:
+                    warnings_var.set(f"⚠ {' | '.join(warnings)}")
+                else:
+                    warnings_var.set("")
+
+        tree.bind('<<TreeviewSelect>>', on_tree_select)
 
         def on_select():
-            sel = listbox.curselection()
-            if sel:
-                selected = installs[sel[0]]
+            selection = tree.selection()
+            if selection:
+                index = int(selection[0])
+                selected = installs[index]
                 health = int(selected.get('health_score', 0) * 100)
                 self.engine_path.set(selected['engine_root'])
                 self.log(f"✓ Selected {selected['version']} (health: {health}%)")
@@ -822,6 +1222,8 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         ttk.Button(button_frame, text="Select", command=on_select,
                    style="Accent.TButton").pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Help", command=lambda: gui_helpers.show_engine_detection_help(
+            dialog, self.browse_engine_path)).pack(side=tk.LEFT, padx=5)
 
     def start_install(self):
         self.btn_install.config(state=tk.DISABLED)
@@ -917,31 +1319,42 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             with open(version_file, 'w') as f:
                 f.write(f"{self.get_tool_version()}\n")
             
-            # 3. Create EngineDirs.txt
+            # 3. Create EngineDirs.txt using SourceManager
             if self.engine_path.get() and self.engine_dirs:
-                self.log("Configuring Engine directories...")
+                self.log("Configuring Engine directories via SourceManager...")
                 engine_root = self.engine_path.get().rstrip('/\\')
-                output = target / "src" / "indexing" / "EngineDirs.txt"
 
                 # Validate engine root exists
                 if not Path(engine_root).exists():
                     self.log(f"⚠ WARNING: Engine path does not exist: {engine_root}")
                     self.log("  Index building may fail. Please verify the engine path.")
 
+                # Use SourceManager for consistent file handling
+                target_source_manager = SourceManager(target)
+
+                # Resolve placeholders and add directories
                 valid_paths = 0
                 invalid_paths = []
+                resolved_dirs = []
 
+                for d in self.engine_dirs:
+                    resolved = d.replace("{ENGINE_ROOT}", engine_root)
+                    resolved_dirs.append(resolved)
+
+                    # Validate path exists
+                    if Path(resolved).exists():
+                        valid_paths += 1
+                    else:
+                        invalid_paths.append(resolved)
+
+                # Write all engine dirs at once
+                output = target / "src" / "indexing" / "EngineDirs.txt"
+                output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, 'w') as f:
                     f.write(f"# Auto-generated for Engine Root: {engine_root}\n")
-                    for d in self.engine_dirs:
-                        resolved = d.replace("{ENGINE_ROOT}", engine_root)
-                        f.write(f"{resolved}\n")
-
-                        # Validate path exists
-                        if Path(resolved).exists():
-                            valid_paths += 1
-                        else:
-                            invalid_paths.append(resolved)
+                    f.write(f"# Managed by SourceManager - Deployment Wizard v{self.get_tool_version()}\n")
+                    for d in resolved_dirs:
+                        f.write(f"{d}\n")
 
                 self.log(f"✓ Wrote {len(self.engine_dirs)} engine source paths to EngineDirs.txt")
                 self.log(f"  Valid paths: {valid_paths}, Invalid paths: {len(invalid_paths)}")
@@ -955,10 +1368,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             else:
                 self.log("⚠ WARNING: No engine path configured - index will be empty!")
                 self.log("  Go to Configuration tab and set Engine Path before building index.")
-            
-            # 4. Create ProjectDirs.txt
+
+            # 4. Create ProjectDirs.txt using SourceManager
             project_dirs_final = list(self.project_dirs)
-            
+
             # Add the single one if specified via simple browse
             if self.project_path.get():
                 p = self.project_path.get()
@@ -970,9 +1383,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     project_dirs_final.append(p)
 
             if project_dirs_final:
-                self.log(f"Configuring {len(project_dirs_final)} project directories...")
-                with open(target / "src" / "indexing" / "ProjectDirs.txt", 'w') as f:
+                self.log(f"Configuring {len(project_dirs_final)} project directories via SourceManager...")
+                # Use SourceManager for consistent file handling
+                target_source_manager = SourceManager(target)
+                output = target / "src" / "indexing" / "ProjectDirs.txt"
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with open(output, 'w') as f:
                     f.write("# Auto-generated Project Directories\n")
+                    f.write(f"# Managed by SourceManager - Deployment Wizard v{self.get_tool_version()}\n")
                     for p in project_dirs_final:
                         f.write(f"{p}\n")
             

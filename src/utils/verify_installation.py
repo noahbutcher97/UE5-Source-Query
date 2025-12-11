@@ -255,17 +255,41 @@ def verify_engine_paths() -> HealthCheckResult:
                 is_critical=False
             )
 
+        # Resolve {ENGINE_ROOT} placeholder from config
+        engine_root = None
+        config_file = root / "config" / ".env"
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                for config_line in f:
+                    config_line = config_line.strip()
+                    if config_line.startswith('UE_ENGINE_ROOT='):
+                        engine_root = config_line.split('=', 1)[1].strip()
+                        break
+
         # Check a sample of paths
         valid_count = 0
         invalid_paths = []
         for line in lines[:5]:  # Check first 5 paths
-            path = Path(line)
+            # Resolve placeholder if present
+            if '{ENGINE_ROOT}' in line and engine_root:
+                resolved_line = line.replace('{ENGINE_ROOT}', engine_root)
+            else:
+                resolved_line = line
+
+            path = Path(resolved_line)
             if path.exists() and path.is_dir():
                 valid_count += 1
             else:
                 invalid_paths.append(line)
 
         if valid_count == 0 and len(lines) > 0:
+            if not engine_root:
+                return HealthCheckResult(
+                    "Engine Paths",
+                    False,
+                    f"Engine root not configured in config/.env. Run Configuration tab to set UE_ENGINE_ROOT.",
+                    is_critical=False
+                )
             return HealthCheckResult(
                 "Engine Paths",
                 False,

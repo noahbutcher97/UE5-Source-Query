@@ -183,6 +183,24 @@ def get_engine_path_interactive() -> Optional[str]:
             seen.add(key)
             unique_installs.append(install)
 
+    # Sort by version descending (newest first)
+    # This ensures UE_5.3 appears before UE_4.23
+    def version_sort_key(install):
+        version = install.get("version", "")
+        try:
+            # Extract version number (e.g., "UE_5.3" -> 5.3)
+            version_str = version.replace("UE_", "").replace("UE", "")
+            parts = version_str.split(".")
+            if len(parts) >= 2:
+                return float(f"{parts[0]}.{parts[1]}")
+            elif len(parts) == 1:
+                return float(parts[0])
+        except (ValueError, IndexError):
+            pass
+        return 0.0  # Unknown versions go to end
+
+    unique_installs.sort(key=version_sort_key, reverse=True)
+
     # Display results
     print(f"[3/3] Found {len(unique_installs)} UE5 installation(s)\n")
 
@@ -228,10 +246,10 @@ def get_engine_path_interactive() -> Optional[str]:
 
         validation = validate_engine_path(custom_path)
         if validation:
-            print(f"\n✓ Valid engine path: {validation['engine_root']}")
+            print(f"\n[OK] Valid engine path: {validation['engine_root']}")
             return validation["engine_root"]
         else:
-            print(f"\n✗ Invalid path: {custom_path}")
+            print(f"\n[ERROR] Invalid path: {custom_path}")
             print("  Path must contain Engine/Source, Engine/Plugins, and Engine/Build directories")
             print()
 
@@ -286,7 +304,7 @@ def generate_engine_dirs(template_path: Path, output_path: Path, engine_root: st
                 invalid_paths.append(str(line))
 
         if valid_count == 0 and dir_count > 0:
-            print(f"\n✗ ERROR: None of the generated paths exist!")
+            print(f"\n[ERROR] None of the generated paths exist!")
             print(f"  Engine Root: {engine_root}")
             print(f"  This suggests the wrong engine path was selected.")
             print(f"\n  First few paths that should exist:")
@@ -306,7 +324,7 @@ def generate_engine_dirs(template_path: Path, output_path: Path, engine_root: st
                 print("Operation cancelled. Try selecting a different UE5 installation.")
                 return False
 
-        print(f"\n✓ Generated {output_path}")
+        print(f"\n[OK] Generated {output_path}")
         print(f"  Engine Root: {engine_root}")
         print(f"  Directories: {dir_count}")
         print(f"  Valid paths: {valid_count}/{dir_count}")
@@ -325,9 +343,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--json":
         registry_installs = detect_from_registry()
         common_installs = detect_from_common_locations()
-        
+
         all_installs = registry_installs + common_installs
-        
+
         # Deduplicate based on engine_root
         seen = set()
         unique_installs = []
@@ -336,7 +354,23 @@ if __name__ == "__main__":
             if key not in seen:
                 seen.add(key)
                 unique_installs.append(install)
-        
+
+        # Sort by version descending (newest first)
+        def version_sort_key(install):
+            version = install.get("version", "")
+            try:
+                version_str = version.replace("UE_", "").replace("UE", "")
+                parts = version_str.split(".")
+                if len(parts) >= 2:
+                    return float(f"{parts[0]}.{parts[1]}")
+                elif len(parts) == 1:
+                    return float(parts[0])
+            except (ValueError, IndexError):
+                pass
+            return 0.0
+
+        unique_installs.sort(key=version_sort_key, reverse=True)
+
         print(json.dumps(unique_installs))
         sys.exit(0)
 

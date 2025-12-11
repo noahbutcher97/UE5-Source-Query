@@ -22,6 +22,7 @@ try:
     from src.utils.source_manager import SourceManager
     from src.utils.engine_helper import get_available_engines, resolve_uproject_source
     from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from src.utils.cuda_installer import install_cuda_with_progress
     from src.utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from src.utils import gui_helpers
     from src.core.hybrid_query import HybridQueryEngine
@@ -31,6 +32,7 @@ except ImportError:
     from utils.source_manager import SourceManager
     from utils.engine_helper import get_available_engines, resolve_uproject_source
     from utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+    from utils.cuda_installer import install_cuda_with_progress
     from utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from utils import gui_helpers
     from core.hybrid_query import HybridQueryEngine
@@ -2213,11 +2215,27 @@ class UnifiedDashboard:
         # Status Section
         status_frame = ttk.LabelFrame(frame, text=" System Status ", padding=15)
         status_frame.pack(fill=tk.X, pady=(0, 20))
-        
+
         self.lbl_index_status = ttk.Label(status_frame, text="Index Status: Unknown", font=Theme.FONT_BOLD)
         self.lbl_index_status.pack(side=tk.LEFT)
-        
+
         ttk.Button(status_frame, text="Refresh Status", command=self.check_status).pack(side=tk.RIGHT)
+
+        # Progress Section (NEW)
+        progress_frame = ttk.LabelFrame(frame, text=" Operation Progress ", padding=15)
+        progress_frame.pack(fill=tk.X, pady=(0, 20))
+
+        # Progress bar
+        self.maint_progress = ttk.Progressbar(progress_frame, mode='determinate', maximum=100)
+        self.maint_progress.pack(fill=tk.X, pady=(0, 10))
+
+        # Progress label showing current step
+        self.maint_progress_label = ttk.Label(progress_frame, text="Ready", font=Theme.FONT_NORMAL)
+        self.maint_progress_label.pack(anchor=tk.W)
+
+        # Time estimate label
+        self.maint_time_label = ttk.Label(progress_frame, text="", font=Theme.FONT_SMALL, foreground="gray")
+        self.maint_time_label.pack(anchor=tk.W)
 
         # Actions Section
         action_frame = ttk.LabelFrame(frame, text=" Maintenance Actions ", padding=15)
@@ -2288,6 +2306,45 @@ class UnifiedDashboard:
         )
         btn_verify.grid(row=2, column=1, padx=5, pady=5)
 
+        # Row 4: GPU/CUDA Setup (NEW)
+        tk.Label(
+            action_grid,
+            text="GPU Acceleration:",
+            font=("Arial", 10, "bold"),
+            bg=Theme.BG_LIGHT,
+            fg=Theme.TEXT_DARK
+        ).grid(row=3, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+
+        # GPU status frame
+        gpu_status_frame = tk.Frame(action_grid, bg=Theme.BG_LIGHT)
+        gpu_status_frame.grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
+
+        self.gpu_status_label = tk.Label(
+            gpu_status_frame,
+            text="Checking...",
+            font=("Arial", 9),
+            bg=Theme.BG_LIGHT,
+            fg="#7F8C8D"
+        )
+        self.gpu_status_label.pack(side=tk.LEFT)
+
+        self.btn_cuda_setup = tk.Button(
+            gpu_status_frame,
+            text="⚙ Setup CUDA",
+            command=self.setup_cuda,
+            bg="#8E44AD",  # Purple for GPU
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2",
+            state=tk.DISABLED  # Initially disabled until we check status
+        )
+        self.btn_cuda_setup.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Check GPU status after UI is built
+        self.root.after(100, self.check_gpu_status)
+
         # Close button at bottom
         close_frame = tk.Frame(action_frame, bg=Theme.BG_LIGHT)
         close_frame.pack(fill=tk.X, pady=(15, 0))
@@ -2345,12 +2402,79 @@ class UnifiedDashboard:
     def rebuild_index(self):
         if not messagebox.askyesno("Confirm", "Rebuild vector index? This may take 5-15 minutes."):
             return
-        
+
         self.log_maint("Starting index rebuild...", clear=True)
         self.btn_rebuild.config(state=tk.DISABLED)
         self.btn_cancel.config(text="Cancel")
         self.cancelled = False
-        
+
+        # Reset progress bar
+        self.maint_progress['value'] = 0
+        self.maint_progress_label.config(text="Initializing...")
+        self.maint_time_label.config(text="Estimated time: calculating...")
+
+        import time
+        start_time = time.time()
+
+        def update_progress(value, label_text):
+            """Update progress bar and label"""
+            self.maint_progress['value'] = value
+            self.maint_progress_label.config(text=label_text)
+
+            # Calculate time estimate
+            elapsed = time.time() - start_time
+            if value > 0:
+                estimated_total = elapsed / (value / 100)
+                remaining = estimated_total - elapsed
+                if remaining > 60:
+                    time_str = f"{remaining / 60:.1f} minutes remaining"
+                else:
+                    time_str = f"{remaining:.0f} seconds remaining"
+                self.maint_time_label.config(text=f"Elapsed: {elapsed:.0f}s | {time_str}")
+
+        def parse_progress(line):
+            """Parse build output to determine progress percentage"""
+            import re
+
+            # Progress stages and their percentage ranges
+            # Stage 1: Discovery (0-10%)
+            if "Discovering" in line or "Finding" in line:
+                return 5, "Discovering source files..."
+            if "Found" in line and "files" in line:
+                return 10, f"Discovered files: {line.strip()}"
+
+            # Stage 2: Chunking (10-30%)
+            if "Chunking" in line or "Processing" in line:
+                match = re.search(r'(\d+)/(\d+)', line)
+                if match:
+                    current, total = int(match.group(1)), int(match.group(2))
+                    progress = 10 + (current / total * 20) if total > 0 else 15
+                    return progress, f"Processing files ({current}/{total})..."
+                return 20, "Processing files..."
+
+            # Stage 3: Embedding generation (30-90%)
+            if "Embedding" in line or "batch" in line.lower():
+                match = re.search(r'(\d+)/(\d+)', line)
+                if match:
+                    current, total = int(match.group(1)), int(match.group(2))
+                    progress = 30 + (current / total * 60) if total > 0 else 60
+                    return progress, f"Generating embeddings ({current}/{total})..."
+                # Alternative progress pattern
+                match = re.search(r'(\d+)%', line)
+                if match:
+                    pct = int(match.group(1))
+                    progress = 30 + (pct * 0.6)
+                    return progress, f"Generating embeddings ({pct}%)..."
+                return 60, "Generating embeddings..."
+
+            # Stage 4: Saving (90-100%)
+            if "Saving" in line or "Writing" in line:
+                return 95, "Saving vector store..."
+            if "Complete" in line or "SUCCESS" in line or "Done" in line:
+                return 100, "Complete!"
+
+            return None, None
+
         def _run():
             try:
                 script = self.script_dir / "tools" / "rebuild-index.bat"
@@ -2363,24 +2487,42 @@ class UnifiedDashboard:
                     universal_newlines=True,
                     cwd=str(self.script_dir)
                 )
-                
+
                 if self.current_process.stdout:
                     for line in iter(self.current_process.stdout.readline, ''):
                         if self.cancelled: break
                         if line:
-                            self.root.after(0, lambda l=line: self.log_maint(l.strip(), append=True))
-                
+                            stripped = line.strip()
+                            self.root.after(0, lambda l=stripped: self.log_maint(l, append=True))
+
+                            # Parse progress
+                            progress, label = parse_progress(stripped)
+                            if progress is not None:
+                                self.root.after(0, lambda p=progress, l=label: update_progress(p, l))
+
                 if not self.cancelled:
                     self.current_process.wait()
                     if self.current_process.returncode == 0:
+                        self.root.after(0, lambda: update_progress(100, "Index rebuild complete!"))
                         self.root.after(0, lambda: self.log_maint("[SUCCESS] Index rebuild complete.", append=True))
                         self.root.after(0, self.check_status)
+
+                        # Show elapsed time
+                        elapsed = time.time() - start_time
+                        if elapsed > 60:
+                            elapsed_str = f"{elapsed / 60:.1f} minutes"
+                        else:
+                            elapsed_str = f"{elapsed:.0f} seconds"
+                        self.root.after(0, lambda e=elapsed_str:
+                            self.maint_time_label.config(text=f"Completed in {e}"))
                     else:
+                        self.root.after(0, lambda: update_progress(0, "Failed"))
                         self.root.after(0, lambda: self.log_maint(f"[ERROR] Failed with code {self.current_process.returncode}", append=True))
 
             except Exception as e:
-                 if not self.cancelled:
+                if not self.cancelled:
                     self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+                    self.root.after(0, lambda: update_progress(0, "Error"))
             finally:
                 self.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
                 self.root.after(0, lambda: self.btn_cancel.config(text="Close"))
@@ -2450,6 +2592,139 @@ class UnifiedDashboard:
                 self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def check_gpu_status(self):
+        """Check GPU status and update the maintenance tab UI."""
+        def _check():
+            try:
+                gpu_summary = get_gpu_summary()
+
+                if gpu_summary.get('has_nvidia_gpu'):
+                    gpu_name = gpu_summary.get('gpu_name', 'Unknown GPU')
+                    cuda_installed = gpu_summary.get('cuda_installed')
+                    cuda_compatible = gpu_summary.get('cuda_compatible', False)
+                    needs_cuda = gpu_summary.get('needs_cuda_install', False)
+
+                    if cuda_installed and cuda_compatible:
+                        status = f"✓ {gpu_name} with CUDA {cuda_installed}"
+                        color = Theme.SUCCESS
+                        enable_setup = False
+                    elif cuda_installed and not cuda_compatible:
+                        status = f"⚠ {gpu_name} - CUDA {cuda_installed} (outdated)"
+                        color = "#FFC107"
+                        enable_setup = True
+                    else:
+                        cuda_required = gpu_summary.get('cuda_required', 'Unknown')
+                        status = f"⚠ {gpu_name} - CUDA {cuda_required}+ required"
+                        color = "#FFC107"
+                        enable_setup = True
+
+                    self.root.after(0, lambda: self.gpu_status_label.config(text=status, fg=color))
+                    self.root.after(0, lambda e=enable_setup:
+                        self.btn_cuda_setup.config(state=tk.NORMAL if e else tk.DISABLED))
+
+                    # Store GPU info for setup
+                    self.gpu_info = gpu_summary
+                else:
+                    self.root.after(0, lambda: self.gpu_status_label.config(
+                        text="No NVIDIA GPU detected (CPU mode)", fg="#7F8C8D"))
+                    self.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.DISABLED))
+                    self.gpu_info = None
+
+            except Exception as e:
+                self.root.after(0, lambda: self.gpu_status_label.config(
+                    text=f"Error checking GPU: {e}", fg=Theme.ERROR))
+                self.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.DISABLED))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def setup_cuda(self):
+        """Guide user through CUDA setup process."""
+        if not hasattr(self, 'gpu_info') or not self.gpu_info:
+            messagebox.showerror("Error", "GPU information not available. Please refresh GPU status.")
+            return
+
+        cuda_required = self.gpu_info.get('cuda_required', 'Unknown')
+        gpu_name = self.gpu_info.get('gpu_name', 'Unknown GPU')
+        download_url = self.gpu_info.get('download_url', None)
+
+        if not download_url:
+            messagebox.showerror("Error", "CUDA download URL not available for your GPU.")
+            return
+
+        # Confirm with user
+        response = messagebox.askyesno(
+            "CUDA Setup",
+            f"This will download and install CUDA Toolkit {cuda_required} for your {gpu_name}.\n\n"
+            f"This may take 15-30 minutes and requires administrator privileges.\n\n"
+            f"Continue with CUDA installation?"
+        )
+
+        if not response:
+            return
+
+        self.log_maint(f"Starting CUDA {cuda_required} setup for {gpu_name}...", clear=True)
+        self.btn_cuda_setup.config(state=tk.DISABLED)
+
+        # Update progress display
+        self.maint_progress['value'] = 0
+        self.maint_progress_label.config(text="Downloading CUDA Toolkit...")
+        self.maint_time_label.config(text="This may take 15-30 minutes...")
+
+        def _setup():
+            try:
+                def download_callback(downloaded, total):
+                    if total > 0:
+                        percent = (downloaded / total) * 50  # Download is 50% of process
+                        self.root.after(0, lambda p=percent:
+                            self.maint_progress.config(value=p))
+                        size_mb = downloaded / (1024 * 1024)
+                        total_mb = total / (1024 * 1024)
+                        self.root.after(0, lambda d=size_mb, t=total_mb:
+                            self.maint_progress_label.config(text=f"Downloading: {d:.1f} / {t:.1f} MB"))
+
+                def install_callback(message):
+                    self.root.after(0, lambda m=message: self.log_maint(m, append=True))
+                    if "Installing" in message:
+                        self.root.after(0, lambda: self.maint_progress.config(value=60))
+                        self.root.after(0, lambda: self.maint_progress_label.config(text="Installing CUDA..."))
+                    elif "Complete" in message or "Success" in message:
+                        self.root.after(0, lambda: self.maint_progress.config(value=100))
+                        self.root.after(0, lambda: self.maint_progress_label.config(text="Installation complete!"))
+
+                success = install_cuda_with_progress(
+                    url=download_url,
+                    download_callback=download_callback,
+                    install_callback=install_callback
+                )
+
+                if success:
+                    self.root.after(0, lambda: self.log_maint("\n[SUCCESS] CUDA installation complete!", append=True))
+                    self.root.after(0, lambda: messagebox.showinfo(
+                        "CUDA Installed",
+                        f"CUDA Toolkit {cuda_required} has been installed.\n\n"
+                        "You may need to restart your terminal or IDE for changes to take effect."
+                    ))
+                    # Refresh GPU status
+                    self.root.after(500, self.check_gpu_status)
+                else:
+                    self.root.after(0, lambda: self.log_maint("\n[ERROR] CUDA installation failed", append=True))
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Installation Failed",
+                        "CUDA installation failed. Check the log for details.\n\n"
+                        "You may need to download and install CUDA manually from:\n"
+                        "https://developer.nvidia.com/cuda-downloads"
+                    ))
+
+            except Exception as e:
+                self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+                self.root.after(0, lambda: self.maint_progress_label.config(text="Error"))
+                self.root.after(0, lambda: self.maint_progress.config(value=0))
+            finally:
+                self.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.NORMAL))
+                self.root.after(0, lambda: self.maint_time_label.config(text=""))
+
+        threading.Thread(target=_setup, daemon=True).start()
 
     def log_maint(self, message, clear=False, append=False):
         self.maint_log.config(state=tk.NORMAL)

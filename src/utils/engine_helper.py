@@ -84,6 +84,25 @@ def _legacy_detection(script_dir: Path):
             if "health_score" not in engine:
                 engine["health_score"] = 0.7  # Assume decent health
 
+        # Sort by version descending (newest first)
+        # Extract numeric version for sorting (e.g., "UE_5.3" -> 5.3, "UE_4.23" -> 4.23)
+        def version_key(engine):
+            version = engine.get("version", "")
+            try:
+                # Extract version number from format like "UE_5.3" or "5.3"
+                version_str = version.replace("UE_", "").replace("UE", "")
+                parts = version_str.split(".")
+                # Convert to float for comparison (5.3 > 4.23)
+                if len(parts) >= 2:
+                    return float(f"{parts[0]}.{parts[1]}")
+                elif len(parts) == 1:
+                    return float(parts[0])
+            except (ValueError, IndexError):
+                pass
+            return 0.0  # Unknown versions go to end
+
+        engines.sort(key=version_key, reverse=True)
+
         return engines
     except subprocess.CalledProcessError as e:
         raise Exception(f"Detection failed: {e.stderr}")
@@ -205,3 +224,146 @@ def resolve_uproject_source(uproject_path: str) -> str:
     if source_dir.exists() and source_dir.is_dir():
         return str(source_dir)
     return None
+
+
+def detect_engine_from_vector_store(script_dir: Path):
+    """
+    Detect engine version from vector store metadata.
+
+    Returns:
+        Dict with 'version', 'engine_root', and 'source' keys, or None if not found
+    """
+    import json
+    import re
+
+    vector_meta = script_dir / "data" / "vector_meta.json"
+
+    if not vector_meta.exists():
+        return None
+
+    try:
+        with open(vector_meta, 'r') as f:
+            data = json.load(f)
+
+        # Sample first few items to find engine paths
+        items = data.get('items', [])
+        if not items:
+            return None
+
+        # Look for engine paths in first 10 items
+        for item in items[:10]:
+            path = item.get('path', '')
+
+            # Extract engine version from path (e.g., "C:\...\UE_5.3\Engine\...")
+            match = re.search(r'[/\\]UE[_-]?(\d+\.\d+)[/\\]', path)
+            if match:
+                version = match.group(1)
+                # Extract engine root
+                engine_match = re.search(r'(.+?[/\\]UE[_-]?\d+\.\d+[/\\]Engine)', path)
+                if engine_match:
+                    engine_root = engine_match.group(1)
+                    return {
+                        'version': f"UE_{version}",
+                        'engine_root': engine_root,
+                        'path': str(Path(engine_root).parent),
+                        'source': 'vector_store'
+                    }
+
+        return None
+    except Exception:
+        return None
+
+
+def get_smart_engine_path(script_dir: Path):
+    """
+    Smart engine path detection with priority:
+    1. Vector store (if built index exists)
+    2. Project .uproject file (if in project context)
+    3. Config file
+    4. Auto-detection (newest version)
+
+    Returns:
+        Dict with 'path', 'version', 'source', and 'is_user_override' keys
+    """
+    import json
+
+    result = {
+        'path': None,
+        'version': None,
+        'source': None,
+        'is_user_override': False
+    }
+
+    # Check for user override marker
+    override_file = script_dir / ".engine_override"
+    if override_file.exists():
+        result['is_user_override'] = True
+        try:
+            with open(override_file, 'r') as f:
+                override_data = json.load(f)
+                result['path'] = override_data.get('engine_root')
+                result['version'] = override_data.get('version')
+                result['source'] = 'user_override'
+                if result['path'] and Path(result['path']).exists():
+                    return result
+        except:
+            pass
+
+    # Priority 1: Vector store
+    vector_engine = detect_engine_from_vector_store(script_dir)
+    if vector_engine:
+        result.update(vector_engine)
+        return result
+
+    # Priority 2: Project .uproject file
+    uproject = find_uproject_in_directory(script_dir)
+    if uproject:
+        project_version = get_engine_version_from_uproject(str(uproject))
+        if project_version:
+            # Try to find matching engine
+            try:
+                engines = get_available_engines(script_dir)
+                for engine in engines:
+                    engine_ver = engine.get('version', '')
+                    if project_version in engine_ver:
+                        result['path'] = engine.get('path') or engine.get('engine_root')
+                        result['version'] = engine_ver
+                        result['source'] = 'uproject'
+                        return result
+            except:
+                pass
+
+    # Priority 3: Config file
+    config_file = script_dir / "config" / ".env"
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('UE_ENGINE_ROOT='):
+                        engine_root = line.split('=', 1)[1].strip()
+                        if Path(engine_root).exists():
+                            # Extract version from path
+                            import re
+                            match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
+                            if match:
+                                result['path'] = engine_root
+                                result['version'] = f"UE_{match.group(1)}"
+                                result['source'] = 'config'
+                                return result
+        except:
+            pass
+
+    # Priority 4: Auto-detection (newest)
+    try:
+        engines = get_available_engines(script_dir)
+        if engines:
+            first = engines[0]
+            result['path'] = first.get('path') or first.get('engine_root')
+            result['version'] = first.get('version')
+            result['source'] = 'auto_detect'
+            return result
+    except:
+        pass
+
+    return result

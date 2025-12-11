@@ -642,6 +642,8 @@ docs: update CLAUDE.md with new CLI arguments
 refactor: simplify file discovery logic
 ```
 
+**Important:** Do NOT include AI attribution, co-authorship, or "Generated with Claude" messages in commits. Keep commit messages focused on the changes themselves.
+
 ## Additional Resources
 
 ### User Documentation (docs/Production/)

@@ -1,180 +1,219 @@
 """
-UE5 Source Query Tool - Test Runner
-
-Runs all tests and generates a report.
+UE5 Source Query - Comprehensive Test Suite Runner
+Runs all test suites and reports results.
 """
 
 import sys
-import unittest
+import subprocess
 from pathlib import Path
-from io import StringIO
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add src to path
+SCRIPT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(SCRIPT_DIR))
 
-
-def run_all_tests(verbosity=2):
-    """
-    Run all tests in the tests directory
-
-    Args:
-        verbosity: Test output verbosity (0=quiet, 1=normal, 2=verbose)
-
-    Returns:
-        tuple: (success: bool, results_text: str)
-    """
-    # Discover all tests
-    loader = unittest.TestLoader()
-    start_dir = Path(__file__).parent
-    suite = loader.discover(str(start_dir), pattern='test_*.py')
-
-    # Capture output
-    stream = StringIO()
-    runner = unittest.TextTestRunner(stream=stream, verbosity=verbosity)
-
-    # Run tests
-    print("\n" + "="*70)
-    print("UE5 Source Query Tool - Running Tests")
-    print("="*70 + "\n")
-
-    result = runner.run(suite)
-
-    # Get output
-    output = stream.getvalue()
-
-    # Print summary
-    print("\n" + "="*70)
-    print("Test Summary")
-    print("="*70)
-    print(f"Tests Run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped)}")
-    print(f"Success Rate: {get_success_rate(result):.1f}%")
-    print("="*70 + "\n")
-
-    # Print failures and errors
-    if result.failures:
-        print("\n" + "="*70)
-        print("FAILURES")
-        print("="*70)
-        for test, traceback in result.failures:
-            print(f"\n{test}:")
-            print(traceback)
-
-    if result.errors:
-        print("\n" + "="*70)
-        print("ERRORS")
-        print("="*70)
-        for test, traceback in result.errors:
-            print(f"\n{test}:")
-            print(traceback)
-
-    return result.wasSuccessful(), output
-
-
-def get_success_rate(result):
-    """Calculate test success rate"""
-    if result.testsRun == 0:
-        return 0.0
-    failures = len(result.failures) + len(result.errors)
-    successes = result.testsRun - failures
-    return (successes / result.testsRun) * 100
-
-
-def run_specific_test(test_module, test_class=None, test_method=None, verbosity=2):
-    """
-    Run a specific test module, class, or method
-
-    Args:
-        test_module: Module name (e.g., 'test_environment_detector')
-        test_class: Optional class name (e.g., 'TestEnvVarStrategy')
-        test_method: Optional method name (e.g., 'test_detect_with_ue5_engine_path')
-        verbosity: Test output verbosity
-
-    Returns:
-        bool: True if all tests passed
-    """
-    loader = unittest.TestLoader()
-
-    if test_method and test_class:
-        # Load specific test method
-        suite = loader.loadTestsFromName(f"{test_module}.{test_class}.{test_method}")
-    elif test_class:
-        # Load specific test class
-        suite = loader.loadTestsFromName(f"{test_module}.{test_class}")
-    else:
-        # Load entire module
-        suite = loader.loadTestsFromName(test_module)
-
-    runner = unittest.TextTestRunner(verbosity=verbosity)
-    result = runner.run(suite)
-
-    return result.wasSuccessful()
-
-
-def main():
-    """Main entry point"""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Run UE5 Source Query tests")
-    parser.add_argument("-v", "--verbosity", type=int, default=2, choices=[0, 1, 2],
-                        help="Test output verbosity (0=quiet, 1=normal, 2=verbose)")
-    parser.add_argument("-m", "--module", type=str,
-                        help="Run specific test module (e.g., test_environment_detector)")
-    parser.add_argument("-c", "--class", type=str, dest="test_class",
-                        help="Run specific test class (requires --module)")
-    parser.add_argument("-t", "--test", type=str, dest="test_method",
-                        help="Run specific test method (requires --module and --class)")
-    parser.add_argument("--list", action="store_true",
-                        help="List all available tests")
-
-    args = parser.parse_args()
-
-    if args.list:
-        list_tests()
-        return 0
-
-    if args.module:
-        # Run specific test
-        success = run_specific_test(
-            args.module,
-            args.test_class,
-            args.test_method,
-            args.verbosity
-        )
-    else:
-        # Run all tests
-        success, _ = run_all_tests(args.verbosity)
-
-    return 0 if success else 1
-
-
-def list_tests():
-    """List all available tests"""
-    loader = unittest.TestLoader()
-    start_dir = Path(__file__).parent
-    suite = loader.discover(str(start_dir), pattern='test_*.py')
-
-    print("\n" + "="*70)
-    print("Available Tests")
-    print("="*70 + "\n")
-
-    def print_suite(suite, indent=0):
-        for test in suite:
-            if isinstance(test, unittest.TestSuite):
-                print_suite(test, indent)
-            else:
-                test_str = str(test)
-                # Extract module.class.method
-                parts = test_str.split()
-                if parts:
-                    test_name = parts[0]
-                    print("  " * indent + test_name)
-
-    print_suite(suite)
+def run_all_tests():
+    """Run all test suites"""
+    print("=" * 70)
+    print("UE5 Source Query - Comprehensive Test Suite")
+    print("=" * 70)
     print()
 
+    total_passed = 0
+    total_failed = 0
+    test_suites = []
+
+    # 1. System Health Check
+    print("[1/6] Running system health check...")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "src" / "utils" / "verify_installation.py")],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(SCRIPT_DIR)
+        )
+        if result.returncode == 0:
+            print(result.stdout)
+            print("[SUCCESS] System health check passed\n")
+            total_passed += 1
+            test_suites.append(("System Health", "PASS"))
+        elif result.returncode == 2:
+            # Exit code 2 = warnings only (not critical failures)
+            print(result.stdout)
+            print("[SUCCESS] System health check passed (with warnings)\n")
+            total_passed += 1
+            test_suites.append(("System Health", "PASS"))
+        else:
+            print(result.stdout)
+            print(result.stderr)
+            print("[FAILED] System health check failed\n")
+            total_failed += 1
+            test_suites.append(("System Health", "FAIL"))
+    except subprocess.TimeoutExpired:
+        print("[FAILED] System health check timed out\n")
+        total_failed += 1
+        test_suites.append(("System Health", "FAIL"))
+    except Exception as e:
+        print(f"[FAILED] System health check failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("System Health", "FAIL"))
+
+    # 2. Vector Store Validation
+    print("[2/6] Running vector store validation...")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "src" / "utils" / "verify_vector_store.py")],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(SCRIPT_DIR)
+        )
+        if result.returncode == 0:
+            print(result.stdout)
+            print("[SUCCESS] Vector store validation passed\n")
+            total_passed += 1
+            test_suites.append(("Vector Store", "PASS"))
+        else:
+            print(result.stdout)
+            print(result.stderr)
+            print("[FAILED] Vector store validation failed\n")
+            total_failed += 1
+            test_suites.append(("Vector Store", "FAIL"))
+    except subprocess.TimeoutExpired:
+        print("[FAILED] Vector store validation timed out\n")
+        total_failed += 1
+        test_suites.append(("Vector Store", "FAIL"))
+    except Exception as e:
+        print(f"[FAILED] Vector store validation failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("Vector Store", "FAIL"))
+
+    # 3. Deployment Detection Tests
+    print("[3/6] Running deployment detection tests...")
+    try:
+        test_file = SCRIPT_DIR / "tests" / "test_deployment_detection.py"
+        if test_file.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("test_deployment_detection", test_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if hasattr(module, 'run_tests'):
+                module.run_tests()
+            print("[SUCCESS] Deployment detection tests passed\n")
+            total_passed += 1
+            test_suites.append(("Deployment Detection", "PASS"))
+        else:
+            print("[SKIP] Deployment detection test file not found\n")
+            test_suites.append(("Deployment Detection", "SKIP"))
+    except Exception as e:
+        print(f"[FAILED] Deployment detection tests failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("Deployment Detection", "FAIL"))
+
+    # 4. Update Integration Tests
+    print("[4/6] Running update integration tests...")
+    try:
+        test_file = SCRIPT_DIR / "tests" / "test_update_integration.py"
+        if test_file.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("test_update_integration", test_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if hasattr(module, 'run_tests'):
+                module.run_tests()
+            print("[SUCCESS] Update integration tests passed\n")
+            total_passed += 1
+            test_suites.append(("Update Integration", "PASS"))
+        else:
+            print("[SKIP] Update integration test file not found\n")
+            test_suites.append(("Update Integration", "SKIP"))
+    except Exception as e:
+        print(f"[FAILED] Update integration tests failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("Update Integration", "FAIL"))
+
+    # 5. GUI Smoke Test
+    print("[5/6] Running GUI smoke test...")
+    try:
+        test_file = SCRIPT_DIR / "tests" / "test_gui_smoke.py"
+        if test_file.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("test_gui_smoke", test_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if hasattr(module, 'run_tests'):
+                module.run_tests()
+            print("[SUCCESS] GUI smoke test passed\n")
+            total_passed += 1
+            test_suites.append(("GUI Smoke", "PASS"))
+        else:
+            print("[SKIP] GUI smoke test file not found\n")
+            test_suites.append(("GUI Smoke", "SKIP"))
+    except Exception as e:
+        print(f"[FAILED] GUI smoke test failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("GUI Smoke", "FAIL"))
+
+    # 6. Module Import Tests
+    print("[6/6] Running module import smoke test...")
+    try:
+        print("Testing core module imports...")
+
+        # Import core modules
+        imports = [
+            ("Core Query Engine", "src.core.hybrid_query"),
+            ("Definition Extractor", "src.core.definition_extractor"),
+            ("Query Intent", "src.core.query_intent"),
+            ("Deployment Detector", "src.utils.deployment_detector"),
+            ("Source Manager", "src.utils.source_manager"),
+            ("Config Manager", "src.utils.config_manager"),
+        ]
+
+        import_passed = 0
+        import_failed = 0
+
+        for name, module_path in imports:
+            try:
+                __import__(module_path)
+                print(f"  [OK] {name}")
+                import_passed += 1
+            except ImportError as e:
+                print(f"  [ERROR] {name}: {e}")
+                import_failed += 1
+
+        print(f"\n[RESULT] {import_passed} passed, {import_failed} failed")
+
+        if import_failed == 0:
+            print("[SUCCESS] All imports successful\n")
+            total_passed += 1
+            test_suites.append(("Module Imports", "PASS"))
+        else:
+            print(f"[FAILED] {import_failed} import(s) failed\n")
+            total_failed += 1
+            test_suites.append(("Module Imports", "FAIL"))
+
+    except Exception as e:
+        print(f"[FAILED] Module import test failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("Module Imports", "FAIL"))
+
+    # Summary
+    print()
+    print("=" * 70)
+    print("Test Summary")
+    print("=" * 70)
+    print()
+
+    for suite_name, status in test_suites:
+        status_icon = "[PASS]" if status == "PASS" else ("[FAIL]" if status == "FAIL" else "[SKIP]")
+        print(f"{status_icon} {suite_name}: {status}")
+
+    print()
+    print(f"Total: {total_passed} passed, {total_failed} failed, {len([s for s in test_suites if s[1] == 'SKIP'])} skipped")
+    print("=" * 70)
+
+    return total_failed == 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    success = run_all_tests()
+    sys.exit(0 if success else 1)

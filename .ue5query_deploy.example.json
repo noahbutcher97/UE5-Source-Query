@@ -11,7 +11,7 @@
   },
   "update_sources": {
     "local_dev_repo": "D:\\DevTools\\UE5-Source-Query",
-    "remote_repo": "https://github.com/yourusername/UE5-Source-Query.git",
+    "remote_repo": "https://github.com/noahbutcher97/UE5-Source-Query.git",
     "branch": "master"
   },
   "update_strategy": "auto",

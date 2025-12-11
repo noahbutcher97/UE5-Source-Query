@@ -24,9 +24,10 @@ if "%~1"=="" (
         if exist ".deployments_registry.json" (
             echo -----------------------------------------------------------
             echo DEV REPO DETECTED - Push updates to deployments:
-            echo   update.bat --push-all           Push to all deployments
-            echo   update.bat --push PATH          Push to specific deployment
-            echo   update.bat --dry-run --push-all Preview changes
+            echo   update.bat --push-all              Push to all deployments
+            echo   update.bat --push PATH             Push to specific deployment
+            echo   update.bat --push-all --force      Force incremental update (same version)
+            echo   update.bat --dry-run --push-all    Preview changes
             echo -----------------------------------------------------------
         )
     ) else if exist ".ue5query_deploy.json" (
