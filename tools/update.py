@@ -427,6 +427,9 @@ class UpdateManager:
             print()
             clear_python_cache(self.deployment_root)
 
+            # Run post-update tasks (e.g. package installation)
+            self._post_update_tasks()
+
             # Create restart marker for running GUIs
             marker_file = self.deployment_root / ".needs_restart"
             try:
@@ -524,6 +527,9 @@ class UpdateManager:
             print()
             clear_python_cache(self.deployment_root)
 
+            # Run post-update tasks (e.g. package installation)
+            self._post_update_tasks()
+
             # Create restart marker for running GUIs
             marker_file = self.deployment_root / ".needs_restart"
             try:
@@ -577,6 +583,34 @@ class UpdateManager:
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup_file, dest_file)
                 print(f"[PRESERVE] Restored preserved file: {file_path}")
+
+    def _post_update_tasks(self):
+        """Run post-update maintenance tasks (e.g., package installation)"""
+        pyproject = self.deployment_root / "pyproject.toml"
+        if pyproject.exists():
+            print("\n[SETUP] Updating package installation...")
+            try:
+                # Determine python executable to use (venv or system)
+                # Look for venv first
+                venv_python = self.deployment_root / ".venv" / "Scripts" / "python.exe"
+                if venv_python.exists():
+                    python_exe = str(venv_python)
+                else:
+                    import sys
+                    python_exe = sys.executable
+
+                subprocess.run(
+                    [python_exe, "-m", "pip", "install", "-e", "."],
+                    cwd=str(self.deployment_root),
+                    check=True,
+                    capture_output=True
+                )
+                print("[OK] Package installed in editable mode")
+            except subprocess.CalledProcessError as e:
+                print(f"[WARN] Failed to install package: {e}")
+                print("       (The tool will still work via compatibility imports)")
+            except Exception as e:
+                print(f"[WARN] Error during post-update setup: {e}")
 
     def _update_deployment_info(self, source: str, source_path):
         """Update deployment info in config"""

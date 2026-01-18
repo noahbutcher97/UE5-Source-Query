@@ -144,6 +144,15 @@ def main():
 
         # Initialize engine locally
         try:
+            # Check for index existence first to give a friendly error
+            data_dir = TOOL_ROOT / "data"
+            if not (data_dir / "vector_store.npz").exists():
+                print(f"\n[ERROR] Search index not found at: {data_dir}")
+                print("\nYou must build the index before querying.")
+                print("Run: launcher.bat -> Maintenance -> Rebuild Index")
+                print("Or:  tools/rebuild-index.bat")
+                sys.exit(1)
+
             engine = HybridQueryEngine(TOOL_ROOT)
 
             # Parse filter string if provided

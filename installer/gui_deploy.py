@@ -1356,17 +1356,20 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 # Resolve placeholders and add directories
                 valid_paths = 0
                 invalid_paths = []
-                resolved_dirs = []
+                dirs_to_write = []
 
                 for d in self.engine_dirs:
                     resolved = d.replace("{ENGINE_ROOT}", engine_root)
-                    resolved_dirs.append(resolved)
-
+                    
                     # Validate path exists
                     if Path(resolved).exists():
                         valid_paths += 1
+                        # Write the ORIGINAL path (preserving {ENGINE_ROOT}) if it exists
+                        dirs_to_write.append(d)
                     else:
                         invalid_paths.append(resolved)
+                        # Include invalid paths too (consistent with previous logic) but log warning
+                        dirs_to_write.append(d)
 
                 # Write all engine dirs at once
                 output = target / "src" / "indexing" / "EngineDirs.txt"
@@ -1374,7 +1377,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 with open(output, 'w') as f:
                     f.write(f"# Auto-generated for Engine Root: {engine_root}\n")
                     f.write(f"# Managed by SourceManager - Deployment Wizard v{self.get_tool_version()}\n")
-                    for d in resolved_dirs:
+                    for d in dirs_to_write:
                         f.write(f"{d}\n")
 
                 self.log(f"✓ Wrote {len(self.engine_dirs)} engine source paths to EngineDirs.txt")

@@ -1,35 +1,43 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 
 REM ====================================================================
 REM UE5 Source Query Tool - Setup & Deployment
 REM ====================================================================
-REM Double-click to install the tool.
-REM Includes:
-REM - Engine Version Detection
-REM - Game Project Selection (Optional)
-REM - Automated Installation
-REM ====================================================================
 
 set "SCRIPT_DIR=%~dp0"
 
-REM Check Python
+echo.
+echo ====================================================================
+echo UE5 Source Query - Setup
+echo ====================================================================
+echo.
+
+REM 1. Check Python Availability
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo.
-    echo [ERROR] Python Not Found
-    echo Please install Python 3.8+ from python.org
+    echo [ERROR] Python not found in PATH.
+    echo Please install Python 3.8+ from https://www.python.org/
+    echo Ensure "Add Python to PATH" is checked during installation.
     pause
     exit /b 1
 )
 
-REM Launch GUI deployment wizard
+REM 2. Check Python Version (Simple check)
+for /f "tokens=2" %%I in ('python --version 2^>^&1') do set "PYTHON_VERSION=%%I"
+echo [INFO] Found Python %PYTHON_VERSION%
+
+REM 3. Launch GUI Installer
+echo.
+echo [INFO] Launching Deployment Wizard...
 python "%SCRIPT_DIR%installer\gui_deploy.py"
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Installer crashed or failed.
+    echo [ERROR] Installer exited with error code %errorlevel%.
     pause
+    exit /b %errorlevel%
 )
 
-exit /b %errorlevel%
+echo.
+exit /b 0

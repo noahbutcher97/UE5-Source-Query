@@ -18,8 +18,12 @@ from core import query_engine
 # Universal import that works in both dev and deployed environments
 try:
     from src.utils.config_manager import ConfigManager
+    from src.utils.logger import get_project_logger
 except ImportError:
     from utils.config_manager import ConfigManager
+    from utils.logger import get_project_logger
+
+logger = get_project_logger(__name__)
 
 class HybridQueryEngine:
     """
@@ -83,16 +87,16 @@ class HybridQueryEngine:
         timing['intent_analysis_s'] = time.perf_counter() - t0
 
         if show_reasoning:
-            print(f"\n=== Query Analysis ===")
-            print(f"Type: {intent.query_type.value}")
+            logger.info("=== Query Analysis ===")
+            logger.info(f"Type: {intent.query_type.value}")
             if intent.entity_name:
-                print(f"Entity: {intent.entity_type.value} {intent.entity_name}")
-            print(f"Confidence: {intent.confidence:.2f}")
-            print(f"Reasoning: {intent.reasoning}")
-            print(f"Scope: {scope}")
+                logger.info(f"Entity: {intent.entity_type.value} {intent.entity_name}")
+            logger.info(f"Confidence: {intent.confidence:.2f}")
+            logger.info(f"Reasoning: {intent.reasoning}")
+            logger.info(f"Scope: {scope}")
             if intent.enhanced_query != question:
-                print(f"Enhanced query: {intent.enhanced_query}")
-            print()
+                logger.info(f"Enhanced query: {intent.enhanced_query}")
+            print() # Keep one newline for visual separation in console if needed, or remove
 
         results = {
             'question': question,

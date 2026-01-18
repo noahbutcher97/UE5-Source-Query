@@ -277,19 +277,16 @@ def generate_engine_dirs(template_path: Path, output_path: Path, engine_root: st
         # Normalize engine_root path (remove trailing slashes/backslashes)
         engine_root = str(Path(engine_root)).rstrip('/\\')
 
-        # Substitute placeholder
-        output_content = template_content.replace("{ENGINE_ROOT}", engine_root)
+        # Substitute placeholder for VALIDATION ONLY
+        resolved_content = template_content.replace("{ENGINE_ROOT}", engine_root)
 
-        # Verify substitution happened
-        if "{ENGINE_ROOT}" in output_content:
-            print("WARNING: Some {ENGINE_ROOT} placeholders were not replaced")
-
-        # Write output
+        # Write output (Preserving Placeholders)
+        # We write the original template content (with {ENGINE_ROOT}) so it remains portable
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(output_content, encoding='utf-8')
+        output_path.write_text(template_content, encoding='utf-8')
 
         # Count directories
-        lines = [line.strip() for line in output_content.split('\n')
+        lines = [line.strip() for line in resolved_content.split('\n')
                 if line.strip() and not line.strip().startswith('#')]
         dir_count = len(lines)
 
@@ -302,7 +299,6 @@ def generate_engine_dirs(template_path: Path, output_path: Path, engine_root: st
                 valid_count += 1
             else:
                 invalid_paths.append(str(line))
-
         if valid_count == 0 and dir_count > 0:
             print(f"\n[ERROR] None of the generated paths exist!")
             print(f"  Engine Root: {engine_root}")
@@ -313,7 +309,7 @@ def generate_engine_dirs(template_path: Path, output_path: Path, engine_root: st
             return False
 
         if len(invalid_paths) > len(lines) / 2:
-            print(f"\n⚠ WARNING: Most paths don't exist ({len(invalid_paths)}/{len(lines)})")
+            print(f"\n⚠️ WARNING: Most paths don't exist ({len(invalid_paths)}/{len(lines)})")
             print(f"  Invalid paths (first 5):")
             for p in invalid_paths[:5]:
                 print(f"    - {p}")
@@ -397,6 +393,26 @@ if __name__ == "__main__":
             if template.exists():
                 print("\nGenerating EngineDirs.txt from template...")
                 if generate_engine_dirs(template, output, engine_root):
+                    # NEW: Update .env if it exists
+                    config_env = Path(__file__).parent.parent.parent / "config" / ".env"
+                    if config_env.exists():
+                        try:
+                            content = config_env.read_text(encoding='utf-8')
+                            new_lines = []
+                            updated = False
+                            for line in content.splitlines():
+                                if line.strip().startswith('UE_ENGINE_ROOT='):
+                                    new_lines.append(f"UE_ENGINE_ROOT={engine_root}")
+                                    updated = True
+                                else:
+                                    new_lines.append(line)
+                            
+                            if updated:
+                                config_env.write_text('\n'.join(new_lines), encoding='utf-8')
+                                print(f"[OK] Updated UE_ENGINE_ROOT in {config_env}")
+                        except Exception as e:
+                            print(f"[WARNING] Failed to update .env: {e}")
+
                     sys.exit(0)
                 else:
                     sys.exit(1)
@@ -428,6 +444,26 @@ if __name__ == "__main__":
                 sys.exit(1)
 
         if generate_engine_dirs(template_path, output_path, engine_root):
+            # NEW: Update .env if it exists
+            config_env = Path(__file__).parent.parent.parent / "config" / ".env"
+            if config_env.exists():
+                try:
+                    content = config_env.read_text(encoding='utf-8')
+                    new_lines = []
+                    updated = False
+                    for line in content.splitlines():
+                        if line.strip().startswith('UE_ENGINE_ROOT='):
+                            new_lines.append(f"UE_ENGINE_ROOT={engine_root}")
+                            updated = True
+                        else:
+                            new_lines.append(line)
+                    
+                    if updated:
+                        config_env.write_text('\n'.join(new_lines), encoding='utf-8')
+                        print(f"[OK] Updated UE_ENGINE_ROOT in {config_env}")
+                except Exception as e:
+                    print(f"[WARNING] Failed to update .env: {e}")
+
             sys.exit(0)
         else:
             sys.exit(1)

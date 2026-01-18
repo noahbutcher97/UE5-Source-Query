@@ -86,3 +86,6 @@ logs/
 *.backup
 data/archived/
 nul
+
+.gemini/
+gha-creds-*.json

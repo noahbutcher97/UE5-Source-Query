@@ -24,6 +24,14 @@ from sentence_transformers import SentenceTransformer
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+# Universal import for logger
+try:
+    from src.utils.logger import get_project_logger
+except ImportError:
+    from utils.logger import get_project_logger
+
+logger = get_project_logger(__name__)
+
 TOOL_ROOT = Path(__file__).parent.parent.parent  # Go up to D:\DevTools\UE5-Source-Query
 load_dotenv(dotenv_path=TOOL_ROOT / "config" / ".env", override=True)
 
@@ -122,9 +130,9 @@ def format_matches(matches):
 def copy_to_clipboard(text: str):
     try:
         subprocess.run(["clip"], input=text.strip(), text=True, check=True)
-        print("Copied context to clipboard.")
+        logger.info("Copied context to clipboard.")
     except (FileNotFoundError, subprocess.SubprocessError) as e:
-        print(f"Error: Failed to copy to clipboard: {e}", file=sys.stderr)
+        logger.error(f"Failed to copy to clipboard: {e}")
 
 def query(question: str, top_k: int, embed_model_name: str, api_model_name: str, max_chars: int,
           pattern: str, extensions: str, dry_run: bool, show_prompt: bool, json_out: bool, copy_context: bool):
@@ -169,9 +177,9 @@ def query(question: str, top_k: int, embed_model_name: str, api_model_name: str,
     phase["build_prompt_s"] = time.perf_counter() - t3 - phase["select_s"]
 
     if show_prompt:
-        print("---- Prompt ----")
-        print(prompt)
-        print("---- End Prompt ----")
+        logger.info("---- Prompt ----")
+        logger.info(prompt)
+        logger.info("---- End Prompt ----")
 
     if dry_run or copy_context:
         if json_out:
@@ -182,7 +190,7 @@ def query(question: str, top_k: int, embed_model_name: str, api_model_name: str,
             }, indent=2))
         else:
             print("\nMatches:\n" + format_matches(hits))
-            print("\nTiming (s): " + ", ".join(f"{k}={v:.3f}" for k,v in phase.items()))
+            logger.info("Timing (s): " + ", ".join(f"{k}={v:.3f}" for k,v in phase.items()))
         return
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -209,7 +217,7 @@ def query(question: str, top_k: int, embed_model_name: str, api_model_name: str,
     else:
         print("Answer:\n" + answer)
         print("\nMatches:\n" + format_matches(hits))
-        print("\nTiming (s): " + ", ".join(f"{k}={v:.3f}" for k,v in phase.items()))
+        logger.info("Timing (s): " + ", ".join(f"{k}={v:.3f}" for k,v in phase.items()))
 
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)

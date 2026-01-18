@@ -9,6 +9,11 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from indexing.metadata_enricher import MetadataEnricher
+# Universal import handling for EmbeddingProcessor
+try:
+    from src.indexing.processor import EmbeddingProcessor
+except ImportError:
+    from indexing.processor import EmbeddingProcessor
 
 try:
     from tqdm import tqdm
@@ -397,182 +402,7 @@ def load_cache() -> dict:
 def save_cache(cache: dict) -> None:
     CACHE_FILE.write_text(json.dumps(cache, indent=2))
 
-def embed_batches(model: SentenceTransformer, texts: List[str], model_name: str = None) -> np.ndarray:
-    if not texts:
-        return np.zeros((0, model.get_sentence_embedding_dimension()))
-
-    # Get tokenizer to enforce strict truncation
-    tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
-    max_seq_length = getattr(model, 'max_seq_length', 512)
-
-    # CRITICAL: Use a conservative max length to avoid GPU index errors
-    # RTX 5090 SM 12.0 has issues with edge cases at max token limits
-    safe_max_length = max_seq_length - 10  # Leave 10 token buffer for safety
-
-    # Pre-process texts with STRICT truncation
-    processed_texts = []
-    for text in texts:
-        # Always truncate conservatively to avoid GPU indexing errors
-        if tokenizer:
-            try:
-                # Encode with strict truncation
-                tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=safe_max_length)
-                # Decode back to text (ensures clean truncation)
-                text = tokenizer.decode(tokens, skip_special_tokens=True)
-            except Exception as e:
-                # Fallback: character-level truncation
-                text = text[:safe_max_length * 4]
-        else:
-            # No tokenizer: conservative character truncation
-            text = text[:safe_max_length * 4]
-        processed_texts.append(text)
-
-    bar = tqdm(total=len(processed_texts), desc="Embedding chunks", unit="chunk") if tqdm else None
-    all_vecs = []
-    cuda_failed = False  # Track if we need to fall back to CPU
-
-    # Adaptive batch sizing - reduce batch size on CUDA errors before CPU fallback
-    current_batch_size = EMBED_BATCH
-    cuda_error_count = 0  # Track consecutive CUDA errors
-    batch_size_history = []  # Track batch sizes that worked/failed
-
-    i = 0
-    while i < len(processed_texts):
-        # Use adaptive batch size
-        batch = processed_texts[i:i + current_batch_size]
-        try:
-            # CRITICAL: Force strict truncation at encode level to prevent GPU index errors
-            vecs = model.encode(
-                batch,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-                # Force truncation and padding for consistent tensor dimensions
-                batch_size=current_batch_size,
-                precision='float32',
-                convert_to_tensor=False
-            )
-            all_vecs.append(vecs)
-            cuda_error_count = 0  # Reset error count on success
-            batch_size_history.append(('success', current_batch_size))
-            i += current_batch_size  # Advance to next batch
-        except (IndexError, RuntimeError) as e:
-            error_msg = str(e).lower()
-            is_cuda_error = 'cuda' in error_msg or 'device' in error_msg or 'gpu' in error_msg
-
-            if is_cuda_error and not cuda_failed:
-                cuda_error_count += 1
-                batch_size_history.append(('cuda_error', current_batch_size))
-
-                # Enhanced adaptive sizing with more granular steps
-                # Try multiple reduction strategies before CPU fallback
-                if cuda_error_count <= 6 and current_batch_size > 1:
-                    # Strategy 1-2: Try 75% reduction first (less aggressive)
-                    if cuda_error_count <= 2:
-                        new_batch_size = max(1, int(current_batch_size * 0.75))
-                    # Strategy 3-4: Try 50% reduction (moderate)
-                    elif cuda_error_count <= 4:
-                        new_batch_size = max(1, current_batch_size // 2)
-                    # Strategy 5-6: Try 25% reduction (aggressive)
-                    else:
-                        new_batch_size = max(1, current_batch_size // 4)
-
-                    print(f"\n[WARNING] CUDA error at batch {i} (attempt {cuda_error_count}): {str(e)[:100]}")
-                    print(f"[INFO] Reducing batch size: {current_batch_size} -> {new_batch_size}")
-                    print(f"[INFO] Retrying batch {i} with smaller size...")
-
-                    # Add small delay to let GPU recover (increases with attempts)
-                    import time
-                    delay = min(cuda_error_count * 0.5, 3.0)  # Max 3 seconds
-                    if delay > 0:
-                        print(f"[INFO] Waiting {delay:.1f}s for GPU recovery...")
-                        time.sleep(delay)
-
-                    current_batch_size = new_batch_size
-                    continue  # Retry same batch with smaller size
-
-                # If batch size reduction didn't help, fall back to CPU
-                # CUDA error detected - reinitialize model on CPU
-                print(f"\n[WARNING] CUDA error detected at batch {i}: {str(e)[:100]}")
-                print("[INFO] CUDA context is corrupted. Reinitializing model on CPU...")
-                print("[INFO] This will be slower (~5-8 chunks/sec) but will complete successfully.")
-
-                try:
-                    # CRITICAL: Delete old model to free GPU memory and clear CUDA context
-                    del model
-                    import gc
-                    gc.collect()
-
-                    # Clear CUDA cache if available
-                    try:
-                        import torch
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
-                    except:
-                        pass
-
-                    # Reinitialize model from scratch on CPU
-                    # This creates a completely fresh model with no CUDA dependencies
-                    if model_name is None:
-                        model_name = MODEL_NAME  # Use global if not passed
-
-                    print(f"[INFO] Loading fresh model '{model_name}' on CPU...")
-                    model = SentenceTransformer(model_name, device='cpu')
-                    cuda_failed = True
-
-                    # Retry this batch on CPU
-                    vecs = model.encode(
-                        batch,
-                        convert_to_numpy=True,
-                        normalize_embeddings=True,
-                        show_progress_bar=False,
-                        device='cpu'
-                    )
-                    all_vecs.append(vecs)
-                    print(f"[OK] Successfully encoded batch {i} on CPU ({len(batch)} chunks)")
-                    print("[INFO] Continuing on CPU for all remaining batches...")
-                    i += len(batch)  # Advance to next batch
-                except Exception as e2:
-                    print(f"[ERROR] CPU fallback failed: {str(e2)[:200]}")
-                    print("[ERROR] Attempting individual chunk encoding as last resort...")
-                    # As last resort, encode individually on CPU
-                    for idx, text in enumerate(batch):
-                        try:
-                            vec = model.encode([text], convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False, device='cpu')
-                            all_vecs.append(vec)
-                        except Exception as e3:
-                            print(f"[ERROR] Failed chunk {i + idx}: {str(e3)[:100]}")
-                            zero_vec = np.zeros((1, model.get_sentence_embedding_dimension()))
-                            all_vecs.append(zero_vec)
-                    i += len(batch)  # Advance to next batch
-            else:
-                # Non-CUDA error or already in CPU mode - try individual encoding
-                print(f"\n[WARNING] Batch encoding failed at index {i}, encoding individually...")
-                for text in batch:
-                    try:
-                        vec = model.encode(
-                            [text],
-                            convert_to_numpy=True,
-                            normalize_embeddings=True,
-                            show_progress_bar=False
-                        )
-                        all_vecs.append(vec)
-                    except Exception as e2:
-                        # Only use zero vector as last resort
-                        print(f"[ERROR] Chunk encoding failed: {str(e2)[:100]}")
-                        zero_vec = np.zeros((1, model.get_sentence_embedding_dimension()))
-                        all_vecs.append(zero_vec)
-                i += len(batch)  # Advance to next batch
-        if bar: bar.update(len(batch))
-    if bar: bar.close()
-
-    if cuda_failed:
-        print(f"\n[INFO] Completed with CPU fallback. {len(processed_texts)} chunks processed.")
-        print("[INFO] For future builds: Set USE_GPU=false in config/.env for pure CPU mode")
-        print("[INFO] CPU-only builds take ~30-40 minutes but are fully stable")
-
-    return np.vstack(all_vecs)
+# embed_batches moved to src/indexing/processor.py
 
 def is_index_stale(index_path: Path, root: Path) -> bool:
     if not index_path.exists():
@@ -754,57 +584,12 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     # Initialize enricher for single-pass indexing
     enricher = MetadataEnricher()
 
-    # Initialize model with GPU support
-    global GPU_DEVICE
-    model = SentenceTransformer(MODEL_NAME)
-
-    # Auto-detect or configure GPU
-    if USE_GPU == "auto":
-        try:
-            import torch
-            if torch.cuda.is_available():
-                GPU_DEVICE = "cuda"
-                model = model.to(GPU_DEVICE)
-
-                if verbose:
-                    gpu_name = torch.cuda.get_device_name(0)
-                    print(f"GPU detected: {gpu_name}")
-
-                    # Check compute capability for PTX compatibility mode detection
-                    capability = torch.cuda.get_device_capability(0)
-                    sm_version = capability[0] * 10 + capability[1]
-
-                    # PyTorch 2.9.1 with CUDA 12.8 supports up to SM 12.0 (Blackwell - RTX 50 series)
-                    if sm_version > 120:
-                        print(f"GPU Compute: SM {capability[0]}.{capability[1]} (using PTX compatibility mode)")
-                        print(f"Performance: ~40-60x faster than CPU (native support would be 100-200x)")
-                        print(f"Status: GPU acceleration active via JIT compilation")
-                        print(f"Note: Consider updating PyTorch when native support for SM {capability[0]}.{capability[1]} is available")
-                    else:
-                        print(f"GPU Compute: SM {capability[0]}.{capability[1]} (native support)")
-                        print(f"Using CUDA for embeddings (expect 100-200x speedup)")
-        except ImportError:
-            if verbose:
-                print("PyTorch not available, using CPU")
-    elif USE_GPU == "true":
-        try:
-            import torch
-            GPU_DEVICE = "cuda"
-            model = model.to(GPU_DEVICE)
-            if verbose:
-                gpu_name = torch.cuda.get_device_name(0)
-                capability = torch.cuda.get_device_capability(0)
-                sm_version = capability[0] * 10 + capability[1]
-                print(f"GPU forced: {gpu_name}")
-                if sm_version > 120:
-                    print(f"Note: Using PTX compatibility mode for SM {capability[0]}.{capability[1]} (PyTorch 2.9.1 max native support: SM 12.0)")
-        except Exception as e:
-            print(f"Error: Failed to use GPU: {e}")
-            raise
-
-    print(f"Model Device: {model.device}")
-    print(f"Embedding Batch Size: {EMBED_BATCH}")
-
+    # Initialize processor
+    processor = EmbeddingProcessor(MODEL_NAME, use_gpu=USE_GPU, batch_size=EMBED_BATCH)
+    
+    # Auto-detect or configure GPU (Already handled by Processor, just logging extra info if needed)
+    # The processor handles the heavy lifting now
+    
     new_texts, new_meta = [], []
     reused_embeddings, reused_meta = [], []
 
@@ -853,7 +638,7 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
         print(f"New chunks={len(new_texts)} Reused={len(reused_meta)}")
 
     t_embed_start = time.time()
-    new_embeddings = embed_batches(model, new_texts, model_name=MODEL_NAME)
+    new_embeddings = processor.embed_batches(new_texts)
 
     if reused_embeddings:
         embeddings = np.vstack([np.vstack(reused_embeddings), new_embeddings]) if new_embeddings.size else np.vstack(reused_embeddings)
@@ -905,7 +690,7 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
         test_meta = json.loads(OUT_META.read_text())['items']
 
         # Dimension check
-        model_dims = model.get_sentence_embedding_dimension()
+        model_dims = processor.model.get_sentence_embedding_dimension()
         if test_embeddings.shape[1] != model_dims:
             raise ValueError(f"Dimension mismatch: {test_embeddings.shape[1]} != {model_dims}")
 

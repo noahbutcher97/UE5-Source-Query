@@ -26,6 +26,7 @@ try:
     from src.utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from src.utils import gui_helpers
     from src.core.hybrid_query import HybridQueryEngine
+    from src.management.services import UpdateService, SearchService, MaintenanceService
 except ImportError:
     from utils.gui_theme import Theme
     from utils.config_manager import ConfigManager
@@ -36,6 +37,7 @@ except ImportError:
     from utils.deployment_detector import DeploymentDetector, DeploymentRegistry
     from utils import gui_helpers
     from core.hybrid_query import HybridQueryEngine
+    from management.services import UpdateService, SearchService, MaintenanceService
 
 class UnifiedDashboard:
     def __init__(self, root):
@@ -49,6 +51,11 @@ class UnifiedDashboard:
         self.script_dir = SCRIPT_DIR
         self.source_manager = SourceManager(self.script_dir)
         self.config_manager = ConfigManager(self.script_dir)
+        
+        # Initialize Services
+        self.update_service = UpdateService(self.root, self.script_dir)
+        self.search_service = SearchService(self.script_dir, self.config_manager)
+        self.maint_service = MaintenanceService(self.script_dir)
 
         # Deployment detection
         self.deployment_detector = DeploymentDetector(self.script_dir)
@@ -82,72 +89,26 @@ class UnifiedDashboard:
         self._load_initial_engine_path()
 
         # Start periodic check for update notifications
-        self._start_update_check()
+        self.update_service.start_check()
 
-    def _start_update_check(self):
-        """Start periodic polling for update restart marker"""
-        self._check_for_restart_marker()
+        # Check for first run (missing index)
+        self.root.after(1000, self._check_first_run)
 
-    def _check_for_restart_marker(self):
-        """Check if updates require a restart"""
-        marker_file = self.script_dir / ".needs_restart"
-
-        if marker_file.exists():
-            # Marker found - prompt user to restart
-            self._prompt_restart(marker_file)
-
-        # Schedule next check in 10 seconds
-        self.root.after(10000, self._check_for_restart_marker)
-
-    def _prompt_restart(self, marker_file):
-        """Show restart prompt dialog"""
-        try:
-            # Read timestamp from marker
-            update_time = marker_file.read_text().strip()
-
-            # Create prompt dialog
+    def _check_first_run(self):
+        """Check if index is missing and guide user to build it"""
+        store_path = self.script_dir / "data" / "vector_store.npz"
+        if not store_path.exists():
             response = messagebox.askyesno(
-                "Updates Available",
-                f"Updates were pushed to this installation.\n\n{update_time}\n\nRestart dashboard to apply changes?",
+                "Welcome to UE5 Source Query",
+                "Search index not found.\n\nYou need to build the search index before you can query the codebase.\n\nWould you like to build it now? (Recommended)",
                 icon='info'
             )
-
+            
             if response:
-                # User chose to restart - delete marker and restart
-                marker_file.unlink(missing_ok=True)
-                self._restart_application()
-            else:
-                # User chose not to restart yet - delete marker to avoid repeated prompts
-                marker_file.unlink(missing_ok=True)
-                # Show reminder that they can manually restart later
-                self.root.after(0, lambda: messagebox.showinfo(
-                    "Restart Reminder",
-                    "You can restart the dashboard later to apply updates.\n\nChanges will take effect on next restart."
-                ))
-        except Exception as e:
-            print(f"[ERROR] Failed to handle restart marker: {e}")
-            marker_file.unlink(missing_ok=True)
-
-    def _restart_application(self):
-        """Restart the dashboard application"""
-        try:
-            import sys
-            import os
-
-            # Get current Python executable and script
-            python = sys.executable
-            script = sys.argv[0]
-
-            # Close current window
-            self.root.destroy()
-
-            # Restart application
-            os.execl(python, python, script, *sys.argv[1:])
-        except Exception as e:
-            messagebox.showerror(
-                "Restart Failed",
-                f"Failed to restart dashboard: {e}\n\nPlease restart manually."
-            )
+                # Switch to Maintenance tab
+                self.notebook.select(self.tab_maintenance)
+                # Trigger rebuild
+                self.root.after(500, self.rebuild_index)
 
     def _load_initial_engine_path(self):
         """Smart engine path detection with priority-based loading"""
@@ -1088,68 +1049,38 @@ class UnifiedDashboard:
             return
             
         scope = self.query_scope_var.get()
+        embed_model = self.embed_model_var.get()
         
         self.log_query_result("Thinking...", clear=True)
         self.query_entry.config(state=tk.DISABLED)
-        
-        def _run():
-            try:
-                # Initialize engine if needed (Lazy Load)
-                if self.engine is None:
-                    self.log_query_result("Loading search engine (first run only)...", clear=True)
-                    self.config_manager.load()
-                    self.engine = HybridQueryEngine(self.script_dir, self.config_manager)
 
-                # Get configured embedding model
-                embed_model = self.embed_model_var.get()
+        # Prepare filter parameters
+        filter_vars = {
+            'entity_type': self.filter_entity_type_var.get(),
+            'macro': self.filter_macro_var.get(),
+            'file_type': self.filter_file_type_var.get(),
+            'boost_macros': self.filter_boost_macros_var.get()
+        }
 
-                # Build filter kwargs from UI selections
-                filter_kwargs = {}
+        # Success callback
+        def on_success(results):
+            self.root.after(0, lambda: self.display_query_results(results))
+            self.root.after(0, lambda: self.query_entry.config(state=tk.NORMAL))
 
-                # Entity type filter
-                entity_type = self.filter_entity_type_var.get()
-                if entity_type:
-                    filter_kwargs['entity_type'] = entity_type
+        # Error callback
+        def on_error(err):
+            self.root.after(0, lambda: self.log_query_result(f"Error: {err}", clear=True, tag="error"))
+            self.root.after(0, lambda: self.query_entry.config(state=tk.NORMAL))
 
-                # Macro filter
-                macro = self.filter_macro_var.get()
-                if macro:
-                    if macro == "UPROPERTY":
-                        filter_kwargs['has_uproperty'] = True
-                    elif macro == "UCLASS":
-                        filter_kwargs['has_uclass'] = True
-                    elif macro == "UFUNCTION":
-                        filter_kwargs['has_ufunction'] = True
-                    elif macro == "USTRUCT":
-                        filter_kwargs['has_ustruct'] = True
-
-                # File type filter
-                file_type = self.filter_file_type_var.get()
-                if file_type:
-                    filter_kwargs['file_type'] = file_type
-
-                # Boost macros option
-                if self.filter_boost_macros_var.get():
-                    filter_kwargs['boost_macros'] = True
-
-                # Run hybrid query with explicit model and filters
-                results = self.engine.query(
-                    question=query,
-                    top_k=5,
-                    scope=scope,
-                    embed_model_name=embed_model,  # Pass configured model
-                    show_reasoning=False,  # We'll display it manually
-                    **filter_kwargs  # Pass filter parameters
-                )
-
-                self.root.after(0, lambda: self.display_query_results(results))
-
-            except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log_query_result(f"Error: {err}", clear=True, tag="error"))
-            finally:
-                self.root.after(0, lambda: self.query_entry.config(state=tk.NORMAL))
-
-        threading.Thread(target=_run, daemon=True).start()
+        # Delegate search to service
+        self.search_service.execute_query(
+            query=query,
+            scope=scope,
+            embed_model=embed_model,
+            filter_vars=filter_vars,
+            callback=on_success,
+            error_callback=on_error
+        )
 
     def display_query_results(self, results):
         self.results_text.config(state=tk.NORMAL)
@@ -2373,17 +2304,13 @@ class UnifiedDashboard:
         self.check_status()
 
     def cancel_or_close(self):
-        if self.current_process:
+        if self.maint_service.current_process:
             if messagebox.askyesno("Cancel", "Cancel current operation?"):
                 self.cancelled = True
-                try:
-                    self.current_process.terminate()
-                except:
-                    pass
-                self.log_maint("[CANCELLED] Operation cancelled.")
-                self.current_process = None
-                self.btn_rebuild.config(state=tk.NORMAL)
-                self.btn_cancel.config(text="Close")
+                if self.maint_service.cancel_current_process():
+                    self.log_maint("[CANCELLED] Operation cancelled.", append=True)
+                    self.btn_rebuild.config(state=tk.NORMAL)
+                    self.btn_cancel.config(text="Close")
         else:
             self.root.destroy()
 
@@ -2475,123 +2402,74 @@ class UnifiedDashboard:
 
             return None, None
 
-        def _run():
-            try:
-                script = self.script_dir / "tools" / "rebuild-index.bat"
-                self.current_process = subprocess.Popen(
-                    [str(script), "--verbose", "--force"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    cwd=str(self.script_dir)
-                )
-
-                if self.current_process.stdout:
-                    for line in iter(self.current_process.stdout.readline, ''):
-                        if self.cancelled: break
-                        if line:
-                            stripped = line.strip()
-                            self.root.after(0, lambda l=stripped: self.log_maint(l, append=True))
-
-                            # Parse progress
-                            progress, label = parse_progress(stripped)
-                            if progress is not None:
-                                self.root.after(0, lambda p=progress, l=label: update_progress(p, l))
-
+        def on_complete(success, message):
+            self.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.btn_cancel.config(text="Close"))
+            if success:
+                self.root.after(0, lambda: update_progress(100, "Index rebuild complete!"))
+                self.root.after(0, lambda: self.log_maint("[SUCCESS] Index rebuild complete.", append=True))
+                self.root.after(0, self.check_status)
+                
+                elapsed = time.time() - start_time
+                elapsed_str = f"{elapsed / 60:.1f} minutes" if elapsed > 60 else f"{elapsed:.0f} seconds"
+                self.root.after(0, lambda e=elapsed_str: self.maint_time_label.config(text=f"Completed in {e}"))
+            else:
                 if not self.cancelled:
-                    self.current_process.wait()
-                    if self.current_process.returncode == 0:
-                        self.root.after(0, lambda: update_progress(100, "Index rebuild complete!"))
-                        self.root.after(0, lambda: self.log_maint("[SUCCESS] Index rebuild complete.", append=True))
-                        self.root.after(0, self.check_status)
+                    self.root.after(0, lambda: update_progress(0, "Failed"))
+                    self.root.after(0, lambda m=message: self.log_maint(f"\n[ERROR] {m}", append=True))
 
-                        # Show elapsed time
-                        elapsed = time.time() - start_time
-                        if elapsed > 60:
-                            elapsed_str = f"{elapsed / 60:.1f} minutes"
-                        else:
-                            elapsed_str = f"{elapsed:.0f} seconds"
-                        self.root.after(0, lambda e=elapsed_str:
-                            self.maint_time_label.config(text=f"Completed in {e}"))
-                    else:
-                        self.root.after(0, lambda: update_progress(0, "Failed"))
-                        self.root.after(0, lambda: self.log_maint(f"[ERROR] Failed with code {self.current_process.returncode}", append=True))
+        def log_with_progress(line):
+            stripped = line.strip()
+            self.root.after(0, lambda: self.log_maint(stripped, append=True))
+            
+            prog, label = parse_progress(stripped)
+            if prog is not None:
+                self.root.after(0, lambda p=prog, l=label: update_progress(p, l))
 
-            except Exception as e:
-                if not self.cancelled:
-                    self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
-                    self.root.after(0, lambda: update_progress(0, "Error"))
-            finally:
-                self.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
-                self.root.after(0, lambda: self.btn_cancel.config(text="Close"))
-                self.current_process = None
-
-        threading.Thread(target=_run, daemon=True).start()
+        script = self.script_dir / "tools" / "rebuild-index.bat"
+        self.maint_service.run_task(
+            task_name="Index Rebuild",
+            command=[str(script), "--verbose", "--force"],
+            callback=on_complete,
+            log_callback=log_with_progress
+        )
 
     def update_tool(self):
         if not messagebox.askyesno("Confirm", "Update tool from repository?"):
             return
             
         self.log_maint("Updating tool...", clear=True)
+        script = self.script_dir / "tools" / "update.bat"
         
-        def _run():
-            try:
-                script = self.script_dir / "tools" / "update.bat"
-                process = subprocess.Popen(
-                    [str(script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=str(self.script_dir)
-                )
-                for line in process.stdout:
-                    self.root.after(0, lambda l=line: self.log_maint(l.rstrip(), append=True))
-                    
-                process.wait()
-                self.root.after(0, lambda: self.log_maint("\n[DONE] Update complete.", append=True))
-            except Exception as e:
-                 self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
+        self.maint_service.run_task(
+            task_name="Tool Update",
+            command=[str(script)],
+            callback=lambda success, msg: self.root.after(0, lambda: self.log_maint(f"\n[DONE] {msg}", append=True)),
+            log_callback=lambda line: self.root.after(0, lambda l=line: self.log_maint(l.rstrip(), append=True))
+        )
 
-        threading.Thread(target=_run, daemon=True).start()
 
     def verify_installation(self):
-        """Run comprehensive installation verification"""
+        """Run comprehensive installation verification using MaintenanceService"""
         self.log_maint("Running installation verification...", clear=True)
+        verify_script = self.script_dir / "src" / "utils" / "verify_installation.py"
 
-        def _run():
-            try:
-                # Check if verify_installation script exists
-                verify_script = self.script_dir / "src" / "utils" / "verify_installation.py"
+        if not verify_script.exists():
+            self.log_maint("[ERROR] Verification script not found")
+            return
 
-                if not verify_script.exists():
-                    self.root.after(0, lambda: self.log_maint("[ERROR] Verification script not found", append=True))
-                    return
+        def on_complete(success, message):
+            if success:
+                self.root.after(0, lambda: self.log_maint(f"\n[SUCCESS] {message}"))
+            else:
+                self.root.after(0, lambda: self.log_maint(f"\n[WARNING] {message}"))
 
-                # Run verification script
-                process = subprocess.Popen(
-                    [sys.executable, str(verify_script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=str(self.script_dir)
-                )
-
-                for line in process.stdout:
-                    self.root.after(0, lambda l=line: self.log_maint(l.rstrip(), append=True))
-
-                process.wait()
-
-                if process.returncode == 0:
-                    self.root.after(0, lambda: self.log_maint("\n[SUCCESS] Installation verification passed!", append=True))
-                else:
-                    self.root.after(0, lambda: self.log_maint(f"\n[WARNING] Some checks failed (exit code: {process.returncode})", append=True))
-
-            except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
-
-        threading.Thread(target=_run, daemon=True).start()
+        self.maint_service.run_task(
+            task_name="Installation Verification",
+            command=[sys.executable, str(verify_script)],
+            callback=on_complete,
+            log_callback=lambda line: self.root.after(0, lambda: self.log_maint(line.rstrip(), append=True))
+        )
 
     def check_gpu_status(self):
         """Check GPU status and update the maintenance tab UI."""
@@ -2639,7 +2517,16 @@ class UnifiedDashboard:
         threading.Thread(target=_check, daemon=True).start()
 
     def setup_cuda(self):
-        """Guide user through CUDA setup process."""
+        """Launch CUDA setup wizard (Phase 6)"""
+        if self.maint_tab_view:
+            # Delegate to the view if available
+            # Note: View currently calls back to dashboard.setup_cuda, so we need to avoid recursion loop
+            # But the view BUTTON calls dashboard.setup_cuda.
+            # We should move the LOGIC to the view or service.
+            # For now, let's keep the logic here but update it to use the view's widgets if possible
+            pass
+        
+        # Original logic adapted to check for view
         if not hasattr(self, 'gpu_info') or not self.gpu_info:
             messagebox.showerror("Error", "GPU information not available. Please refresh GPU status.")
             return
@@ -2663,34 +2550,36 @@ class UnifiedDashboard:
         if not response:
             return
 
-        self.log_maint(f"Starting CUDA {cuda_required} setup for {gpu_name}...", clear=True)
-        self.btn_cuda_setup.config(state=tk.DISABLED)
-
-        # Update progress display
-        self.maint_progress['value'] = 0
-        self.maint_progress_label.config(text="Downloading CUDA Toolkit...")
-        self.maint_time_label.config(text="This may take 15-30 minutes...")
-
+        # Log to maintenance tab
+        if self.maint_tab_view:
+            self.maint_tab_view.log_maint(f"Starting CUDA {cuda_required} setup for {gpu_name}...", clear=True)
+            self.maint_tab_view.btn_cuda_setup.config(state=tk.DISABLED)
+            
+            # Update progress display
+            self.maint_tab_view.maint_progress['value'] = 0
+            self.maint_tab_view.maint_progress_label.config(text="Downloading CUDA Toolkit...")
+            self.maint_tab_view.maint_time_label.config(text="This may take 15-30 minutes...")
+        
         def _setup():
             try:
                 def download_callback(downloaded, total):
-                    if total > 0:
-                        percent = (downloaded / total) * 50  # Download is 50% of process
-                        self.root.after(0, lambda p=percent:
-                            self.maint_progress.config(value=p))
+                    if self.maint_tab_view and total > 0:
+                        percent = (downloaded / total) * 50
+                        self.root.after(0, lambda p=percent: self.maint_tab_view.maint_progress.config(value=p))
                         size_mb = downloaded / (1024 * 1024)
                         total_mb = total / (1024 * 1024)
-                        self.root.after(0, lambda d=size_mb, t=total_mb:
-                            self.maint_progress_label.config(text=f"Downloading: {d:.1f} / {t:.1f} MB"))
+                        self.root.after(0, lambda d=size_mb, t=total_mb: 
+                            self.maint_tab_view.maint_progress_label.config(text=f"Downloading: {d:.1f} / {t:.1f} MB"))
 
                 def install_callback(message):
-                    self.root.after(0, lambda m=message: self.log_maint(m, append=True))
-                    if "Installing" in message:
-                        self.root.after(0, lambda: self.maint_progress.config(value=60))
-                        self.root.after(0, lambda: self.maint_progress_label.config(text="Installing CUDA..."))
-                    elif "Complete" in message or "Success" in message:
-                        self.root.after(0, lambda: self.maint_progress.config(value=100))
-                        self.root.after(0, lambda: self.maint_progress_label.config(text="Installation complete!"))
+                    if self.maint_tab_view:
+                        self.root.after(0, lambda m=message: self.maint_tab_view.log_maint(m, append=True))
+                        if "Installing" in message:
+                            self.root.after(0, lambda: self.maint_tab_view.maint_progress.config(value=60))
+                            self.root.after(0, lambda: self.maint_tab_view.maint_progress_label.config(text="Installing CUDA..."))
+                        elif "Complete" in message or "Success" in message:
+                            self.root.after(0, lambda: self.maint_tab_view.maint_progress.config(value=100))
+                            self.root.after(0, lambda: self.maint_tab_view.maint_progress_label.config(text="Installation complete!"))
 
                 success = install_cuda_with_progress(
                     url=download_url,
@@ -2699,7 +2588,9 @@ class UnifiedDashboard:
                 )
 
                 if success:
-                    self.root.after(0, lambda: self.log_maint("\n[SUCCESS] CUDA installation complete!", append=True))
+                    if self.maint_tab_view:
+                        self.root.after(0, lambda: self.maint_tab_view.log_maint("\n[SUCCESS] CUDA installation complete!", append=True))
+                    
                     self.root.after(0, lambda: messagebox.showinfo(
                         "CUDA Installed",
                         f"CUDA Toolkit {cuda_required} has been installed.\n\n"
@@ -2708,7 +2599,9 @@ class UnifiedDashboard:
                     # Refresh GPU status
                     self.root.after(500, self.check_gpu_status)
                 else:
-                    self.root.after(0, lambda: self.log_maint("\n[ERROR] CUDA installation failed", append=True))
+                    if self.maint_tab_view:
+                        self.root.after(0, lambda: self.maint_tab_view.log_maint("\n[ERROR] CUDA installation failed", append=True))
+                    
                     self.root.after(0, lambda: messagebox.showerror(
                         "Installation Failed",
                         "CUDA installation failed. Check the log for details.\n\n"
@@ -2717,22 +2610,17 @@ class UnifiedDashboard:
                     ))
 
             except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log_maint(f"\n[ERROR] {err}", append=True))
-                self.root.after(0, lambda: self.maint_progress_label.config(text="Error"))
-                self.root.after(0, lambda: self.maint_progress.config(value=0))
+                if self.maint_tab_view:
+                    self.root.after(0, lambda err=str(e): self.maint_tab_view.log_maint(f"\n[ERROR] {err}", append=True))
+                    self.root.after(0, lambda: self.maint_tab_view.maint_progress_label.config(text="Error"))
+                    self.root.after(0, lambda: self.maint_tab_view.maint_progress.config(value=0))
             finally:
-                self.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.NORMAL))
-                self.root.after(0, lambda: self.maint_time_label.config(text=""))
+                if self.maint_tab_view:
+                    self.root.after(0, lambda: self.maint_tab_view.btn_cuda_setup.config(state=tk.NORMAL))
+                    self.root.after(0, lambda: self.maint_tab_view.maint_time_label.config(text=""))
 
+        import threading
         threading.Thread(target=_setup, daemon=True).start()
-
-    def log_maint(self, message, clear=False, append=False):
-        self.maint_log.config(state=tk.NORMAL)
-        if clear:
-            self.maint_log.delete(1.0, tk.END)
-        self.maint_log.insert(tk.END, message + ("\n" if not message.endswith("\n") else ""))
-        self.maint_log.see(tk.END)
-        self.maint_log.config(state=tk.DISABLED)
 
 def main():
     root = tk.Tk()

@@ -112,11 +112,16 @@ class QueryIntentAnalyzer:
             # Strip common words and see if entity name dominates
             query_words = query.split()
             significant_words = [w for w in query_words if len(w) > 2 and w.lower() not in ['the', 'what', 'where', 'find', 'show']]
+            
+            # Check if any significant word is a definition keyword (e.g., "members")
+            # If so, it's not a "bare" entity lookup, it's a specific request (Hybrid)
+            has_def_keyword = any(w.lower() in self.DEFINITION_KEYWORDS for w in significant_words)
 
             is_bare_entity = (
                 len(significant_words) <= 2 and  # Query is very short
                 entity_name in query and         # Entity name is present
-                entity_type != EntityType.UNKNOWN  # Valid UE5 entity type detected
+                entity_type != EntityType.UNKNOWN and # Valid UE5 entity type detected
+                not has_def_keyword # Not asking for specific members/fields
             )
 
             if is_bare_entity:
@@ -180,24 +185,35 @@ class QueryIntentAnalyzer:
                 # Extract entity type and name
                 groups = match.groups()
                 if len(groups) == 2:
-                    # Determine which group is type and which is name
-                    if groups[0].lower() in ['struct', 'class', 'enum', 'define', 'definition']:
-                        entity_type_str = groups[0].lower()
-                        entity_name = groups[1]
+                    # Identify which group is the "type/keyword" and which is the "name"
+                    g1, g2 = groups[0], groups[1]
+                    
+                    # Heuristic: Known keywords vs Potential Names
+                    known_types = {'struct', 'class', 'enum', 'define', 'definition', 'what', 'show', 'find'}
+                    
+                    # Normalize for checking
+                    g1_lower = g1.lower().replace(' is', '').replace(' me', '') # handle 'what is', 'show me'
+                    g2_lower = g2.lower()
+                    
+                    # Determine entity name and type string
+                    if g1_lower.split()[0] in known_types or 'definition' in g1_lower:
+                        keyword_str = g1_lower
+                        entity_name = g2
                     else:
-                        entity_type_str = groups[1].lower()
-                        entity_name = groups[0]
+                        keyword_str = g2_lower
+                        entity_name = g1
 
                     # Map to EntityType
                     entity_type = EntityType.UNKNOWN
-                    if entity_type_str in ['struct', 'define', 'definition']:
+                    if any(x in keyword_str for x in ['struct', 'define', 'definition']):
                         entity_type = EntityType.STRUCT
-                    elif entity_type_str == 'class':
+                    elif 'class' in keyword_str:
                         entity_type = EntityType.CLASS
-                    elif entity_type_str == 'enum':
+                    elif 'enum' in keyword_str:
                         entity_type = EntityType.ENUM
-
-                    # Verify against naming convention if possible
+                    
+                    # If it was an action like "show me", we don't know the type yet
+                    # So we infer it from the name
                     if entity_type == EntityType.UNKNOWN:
                         entity_type = self._infer_entity_type(entity_name)
 
