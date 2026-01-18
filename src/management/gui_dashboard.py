@@ -18,6 +18,7 @@ sys.path.append(str(SCRIPT_DIR))
 # Universal imports that work in both dev and deployed environments
 try:
     from src.utils.gui_theme import Theme
+    from src.utils.gui_layout import WindowManager
     from src.utils.config_manager import ConfigManager
     from src.utils.source_manager import SourceManager
     from src.utils.engine_helper import get_available_engines, resolve_uproject_source
@@ -42,12 +43,19 @@ except ImportError:
 class UnifiedDashboard:
     def __init__(self, root):
         self.root = root
-        self.root.title("UE5 Source Query Dashboard")
-        self.root.geometry("1000x700")
         
+        # Use Adaptive Layout Engine
+        WindowManager.setup_window(
+            self.root, 
+            "UE5 Source Query Dashboard",
+            target_width_pct=0.8,
+            target_height_pct=0.8,
+            min_w=1000,
+            min_h=700
+        )
+
         # Apply Theme
-        Theme.apply(self.root)
-        
+        Theme.apply(self.root)        
         self.script_dir = SCRIPT_DIR
         self.source_manager = SourceManager(self.script_dir)
         self.config_manager = ConfigManager(self.script_dir)
@@ -2057,15 +2065,19 @@ class UnifiedDashboard:
 
     def show_selection_dialog(self, installations):
         dialog = tk.Toplevel(self.root)
-        dialog.title("Select UE5 Version")
-        dialog.geometry("600x400")
+        
+        # Use Adaptive Layout Engine
+        WindowManager.setup_window(
+            dialog,
+            "Select UE5 Version",
+            target_width_pct=0.5,
+            target_height_pct=0.6,
+            min_w=600,
+            min_h=400
+        )
+        
         dialog.transient(self.root)
         dialog.grab_set()
-
-        self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 600) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 400) // 2
-        dialog.geometry(f"+{x}+{y}")
 
         ttk.Label(dialog, text="Multiple UE5 versions found. Please select one:",
                   font=Theme.FONT_BOLD).pack(pady=10)

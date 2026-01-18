@@ -11,8 +11,14 @@ from tkinter import ttk
 # Universal imports that work in both dev and deployed environments
 try:
     from src.utils.gui_theme import Theme
+    from src.utils.gui_layout import WindowManager, LayoutMetrics
 except ImportError:
     from utils.gui_theme import Theme
+    # If run standalone/tests where utils isn't package
+    try:
+        from src.utils.gui_layout import WindowManager, LayoutMetrics
+    except:
+        pass
 
 
 def show_engine_detection_help(parent, browse_callback):
@@ -24,15 +30,19 @@ def show_engine_detection_help(parent, browse_callback):
         browse_callback: Callback function to execute when "Browse Manually" is clicked
     """
     dialog = tk.Toplevel(parent)
-    dialog.title("UE5 Engine Not Found - Setup Help")
-    dialog.geometry("700x500")
+    
+    # Use Layout Engine for geometry and scaling
+    WindowManager.setup_window(
+        dialog, 
+        "UE5 Engine Not Found - Setup Help",
+        target_width_pct=0.6,
+        target_height_pct=0.7,
+        min_w=700,
+        min_h=500
+    )
+    
     dialog.transient(parent)
     dialog.grab_set()
-
-    parent.update_idletasks()
-    x = parent.winfo_x() + (parent.winfo_width() - 700) // 2
-    y = parent.winfo_y() + (parent.winfo_height() - 500) // 2
-    dialog.geometry(f"+{x}+{y}")
 
     # Title
     title_frame = ttk.Frame(dialog)

@@ -20,6 +20,7 @@ SCRIPT_DIR = Path(__file__).parent.parent
 sys.path.append(str(SCRIPT_DIR))
 
 from src.utils.gui_theme import Theme
+from src.utils.gui_layout import WindowManager
 from src.utils.config_manager import ConfigManager
 from src.utils.source_manager import SourceManager
 from src.utils.engine_helper import (
@@ -33,8 +34,16 @@ from src.utils import gui_helpers
 class DeploymentWizard:
     def __init__(self, root):
         self.root = root
-        self.root.title("UE5 Source Query - Setup & Install")
-        self.root.geometry("900x700")
+        
+        # Use Adaptive Layout Engine
+        WindowManager.setup_window(
+            self.root, 
+            "UE5 Source Query - Setup & Install",
+            target_width_pct=0.7,
+            target_height_pct=0.8,
+            min_w=900,
+            min_h=700
+        )
         
         Theme.apply(self.root)
         self.source_dir = SCRIPT_DIR
@@ -872,11 +881,11 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         """
         Priority-based engine detection:
         1. Vector store (if index exists) - ensures consistency
-        2. .uproject file in target/deployment area - matches project
-        3. Config file (if exists) - user's last choice
-        4. Auto-detection by health score - best available
+        2. Project .uproject file (if in project context)
+        3. Config file
+        4. Auto-detection (newest version)
 
-        This mirrors the Dashboard's get_smart_engine_path() logic.
+        ALWAYS shows the selection dialog to allow user choice.
         """
         self.log("Detecting UE5 installations (priority-based)...")
         self.path_entry.config(state=tk.DISABLED)
@@ -884,6 +893,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         def detect():
             try:
                 target_dir = Path(self.target_dir.get()) if self.target_dir.get() else None
+                preferred_version = None
 
                 # ═══════════════════════════════════════════════════════════════════
                 # PRIORITY 1: Vector Store (if deployment has existing index)
@@ -896,12 +906,12 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         version = vector_engine.get('version', 'unknown')
                         if path and Path(path).exists():
                             self.root.after(0, lambda p=path, v=version:
-                                self.log(f"✓ Found from vector store: {v}"))
-                            self.root.after(0, lambda: self.log("  (Using indexed engine for consistency)"))
-                            self.root.after(0, lambda p=path: self.engine_path.set(p))
-                            return
-                        else:
-                            self.root.after(0, lambda: self.log("  Vector store points to missing path, continuing..."))
+                                self.log(f"  Found from vector store: {v}"))
+                            # Extract version number for preference (e.g. "UE_5.3" -> "5.3")
+                            import re
+                            match = re.search(r'(\d+\.\d+)', version)
+                            if match:
+                                preferred_version = match.group(1)
                 else:
                     self.root.after(0, lambda: self.log("  [1/4] No vector store found"))
 
@@ -919,6 +929,8 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         if project_engine_version:
                             self.root.after(0, lambda p=uproject.name, v=project_engine_version:
                                 self.log(f"  Found project: {p} (requires UE {v})"))
+                            # Project overrides vector store preference
+                            preferred_version = project_engine_version
 
                 # ═══════════════════════════════════════════════════════════════════
                 # PRIORITY 3: Config file (user's previous selection)
@@ -944,6 +956,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                                             }
                                             self.root.after(0, lambda v=config_engine['version']:
                                                 self.log(f"  Found in config: {v}"))
+                                            
+                                            # Config is fallback preference
+                                            if not preferred_version:
+                                                preferred_version = match.group(1)
                                     break
                     except Exception:
                         pass
@@ -975,42 +991,14 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         self.log(f"  Found {v} ({s}) - Health: {h}%"))
 
                 # ═══════════════════════════════════════════════════════════════════
-                # DECISION LOGIC: Choose best engine
+                # SHOW SELECTION DIALOG (Always)
                 # ═══════════════════════════════════════════════════════════════════
-
-                # If we have a project version, prefer matching engine
-                if project_engine_version:
-                    for inst in installations:
-                        if project_engine_version in inst.get('version', ''):
-                            path = inst['engine_root']
-                            version = inst['version']
-                            health = int(inst.get('health_score', 0) * 100)
-                            self.root.after(0, lambda p=path: self.engine_path.set(p))
-                            self.root.after(0, lambda v=version, h=health:
-                                self.log(f"✓ Selected {v} (matches project, health: {h}%)"))
-                            return
-
-                    # No matching version found - warn user
-                    self.root.after(0, lambda v=project_engine_version:
-                        self.log(f"⚠ No engine matching project version {v}"))
-
-                # If we have a config engine and it's in the list with good health, prefer it
-                if config_engine:
-                    for inst in installations:
-                        if inst['engine_root'] == config_engine['path']:
-                            health = int(inst.get('health_score', 0) * 100)
-                            if health >= 60:
-                                self.root.after(0, lambda p=config_engine['path']: self.engine_path.set(p))
-                                self.root.after(0, lambda v=config_engine['version'], h=health:
-                                    self.log(f"✓ Using config engine: {v} (health: {h}%)"))
-                                return
-
+                
                 # Sort by health score (descending)
                 installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
 
-                # Always show version selector so user can override auto-selection
-                # The selector includes "Auto" as the default which picks the best match
-                self.root.after(0, lambda pv=project_engine_version:
+                # Show version selector so user can override auto-selection
+                self.root.after(0, lambda pv=preferred_version:
                     self.show_version_selector(installations, preferred_version=pv))
 
             except Exception as e:
@@ -1031,15 +1019,19 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         Enhanced to provide better visual feedback on engine quality.
         """
         dialog = tk.Toplevel(self.root)
-        dialog.title("Select UE5 Version")
-        dialog.geometry("700x500")
+        
+        # Use Adaptive Layout Engine
+        WindowManager.setup_window(
+            dialog,
+            "Select UE5 Version",
+            target_width_pct=0.5,
+            target_height_pct=0.6,
+            min_w=700,
+            min_h=500
+        )
+        
         dialog.transient(self.root)
         dialog.grab_set()
-
-        self.root.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 700) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 500) // 2
-        dialog.geometry(f"+{x}+{y}")
 
         # Header with recommendation if available
         header_frame = ttk.Frame(dialog)

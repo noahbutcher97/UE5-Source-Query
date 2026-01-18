@@ -339,7 +339,22 @@ class ConfigTab:
     def _show_engine_selection_dialog(self, installations):
         dialog = tk.Toplevel(self.dashboard.root)
         dialog.title("Select UE5 Installation")
-        dialog.geometry("500x400")
+        dialog.minsize(500, 400)
+        
+        # Center dynamic
+        root_x = self.dashboard.root.winfo_x()
+        root_y = self.dashboard.root.winfo_y()
+        root_w = self.dashboard.root.winfo_width()
+        root_h = self.dashboard.root.winfo_height()
+        
+        width = 600
+        height = 500
+        
+        x = root_x + (root_w - width) // 2
+        y = root_y + (root_h - height) // 2
+        
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        
         Theme.apply(dialog)
 
         ttk.Label(dialog, text="Found the following installations:", font=Theme.FONT_BOLD).pack(pady=10)
