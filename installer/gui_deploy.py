@@ -20,7 +20,7 @@ SCRIPT_DIR = Path(__file__).parent.parent
 sys.path.append(str(SCRIPT_DIR))
 
 from src.utils.gui_theme import Theme
-from src.utils.gui_layout import WindowManager
+from src.utils.gui_layout import WindowManager, LayoutMetrics, Responsive
 from src.utils.config_manager import ConfigManager
 from src.utils.source_manager import SourceManager
 from src.utils.engine_helper import (
@@ -67,6 +67,7 @@ class DeploymentWizard:
         self.embed_model = tk.StringVar(value='microsoft/unixcoder-base')
         self.api_model = tk.StringVar(value='claude-3-haiku-20240307')
         self.embed_batch_size = tk.StringVar(value='16')
+        self.text_scale = tk.DoubleVar(value=LayoutMetrics().text_scale)
 
         self.current_process = None
         self.is_running = False
@@ -179,29 +180,60 @@ class DeploymentWizard:
                  font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(30,0))
 
     def build_config_tab(self):
-        frame = ttk.Frame(self.tab_config, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
+        # Create scrollable container using Responsive helper
+        outer_frame, frame = Responsive.make_scrollable(self.tab_config)
         
-        ttk.Label(frame, text="Anthropic API Key", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
-        ttk.Label(frame, text="Get your API key from: https://console.anthropic.com/settings/keys", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
+        # Add padding wrapper for aesthetic
+        content_frame = ttk.Frame(frame, padding=20)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(content_frame, text="Anthropic API Key", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        ttk.Label(content_frame, text="Get your API key from: https://console.anthropic.com/settings/keys", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
 
-        api_frame = ttk.Frame(frame)
+        api_frame = ttk.Frame(content_frame)
         api_frame.pack(fill=tk.X, pady=(0, 20))
         
         self.api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="*")
         self.api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(api_frame, text="Show", command=self.toggle_api_visibility).pack(side=tk.LEFT)
+
+        # UI Appearance
+        ttk.Label(content_frame, text="UI Appearance", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        ui_frame = ttk.Frame(content_frame)
+        ui_frame.pack(fill=tk.X, pady=(0, 20))
         
+        ttk.Label(ui_frame, text="Text Scale:", font=Theme.FONT_NORMAL).pack(side=tk.LEFT)
+        
+        def update_scale_label(val):
+            self.lbl_scale.config(text=f"{float(val):.1f}x")
+            
+        scale_slider = ttk.Scale(ui_frame, from_=0.8, to=2.0, variable=self.text_scale, command=update_scale_label)
+        scale_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        
+        self.lbl_scale = ttk.Label(ui_frame, text=f"{self.text_scale.get():.1f}x")
+        self.lbl_scale.pack(side=tk.LEFT)
+
+        # Apply Button for UI scale
+        def apply_scale():
+            new_scale = self.text_scale.get()
+            LayoutMetrics().set_text_scale(new_scale)
+            if messagebox.askyesno("Restart Required", "UI scale saved. Restart installer to apply changes?"):
+                self.root.destroy()
+                import os
+                subprocess.Popen([sys.executable, str(Path(__file__))])
+
+        ttk.Button(ui_frame, text="Apply & Restart", command=apply_scale).pack(side=tk.LEFT, padx=10)
+
         # Vector Storage
-        ttk.Label(frame, text="Vector Storage Directory", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
-        vec_frame = ttk.Frame(frame)
+        ttk.Label(content_frame, text="Vector Storage Directory", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        vec_frame = ttk.Frame(content_frame)
         vec_frame.pack(fill=tk.X, pady=(0, 20))
         ttk.Entry(vec_frame, textvariable=self.vector_store_path).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(vec_frame, text="Browse...", command=self.browse_vector_store).pack(side=tk.LEFT)
 
-        ttk.Label(frame, text="UE5 Engine Path", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        ttk.Label(content_frame, text="UE5 Engine Path", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
         
-        path_frame = ttk.Frame(frame)
+        path_frame = ttk.Frame(content_frame)
         path_frame.pack(fill=tk.X)
         self.path_entry = ttk.Entry(path_frame, textvariable=self.engine_path)
         self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
@@ -209,32 +241,32 @@ class DeploymentWizard:
         ttk.Button(path_frame, text="Auto-Detect", command=self.auto_detect_engine).pack(side=tk.LEFT)
 
         # Model Settings
-        ttk.Label(frame, text="Model Settings", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
+        ttk.Label(content_frame, text="Model Settings", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
         
-        ttk.Label(frame, text="Embedding Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
-        embed_combo = ttk.Combobox(frame, textvariable=self.embed_model, state='readonly')
+        ttk.Label(content_frame, text="Embedding Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        embed_combo = ttk.Combobox(content_frame, textvariable=self.embed_model, state='readonly')
         embed_combo['values'] = ('microsoft/unixcoder-base', 'sentence-transformers/all-MiniLM-L6-v2')
         embed_combo.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(frame, text="Claude API Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
-        api_model_combo = ttk.Combobox(frame, textvariable=self.api_model, state='readonly')
+        ttk.Label(content_frame, text="Claude API Model:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        api_model_combo = ttk.Combobox(content_frame, textvariable=self.api_model, state='readonly')
         api_model_combo['values'] = ('claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')
         api_model_combo.pack(fill=tk.X, pady=(0, 10))
 
         # GPU Optimization
-        ttk.Label(frame, text="GPU Optimization", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
+        ttk.Label(content_frame, text="GPU Optimization", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(20,5))
 
-        ttk.Label(frame, text="Embedding Batch Size:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
-        ttk.Label(frame, text="RTX 5090: Use 8-16 | RTX 4090/3090: Use 32+ | CPU: Use 1-4", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 5))
-        batch_size_combo = ttk.Combobox(frame, textvariable=self.embed_batch_size, state='readonly')
+        ttk.Label(content_frame, text="Embedding Batch Size:", font=Theme.FONT_NORMAL).pack(anchor=tk.W)
+        ttk.Label(content_frame, text="RTX 5090: Use 8-16 | RTX 4090/3090: Use 32+ | CPU: Use 1-4", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 5))
+        batch_size_combo = ttk.Combobox(content_frame, textvariable=self.embed_batch_size, state='readonly')
         batch_size_combo['values'] = ('1', '2', '4', '8', '16', '32', '64')
         batch_size_combo.pack(fill=tk.X, pady=(0, 10))
 
         # Save Button
-        ttk.Button(frame, text="💾 Save Configuration", command=self.save_config_preview, style='Accent.TButton').pack(pady=20)
+        ttk.Button(content_frame, text="💾 Save Configuration", command=self.save_config_preview, style='Accent.TButton').pack(pady=20)
 
         # Configuration Log
-        config_log_frame = ttk.LabelFrame(frame, text=" Configuration Preview ", padding=5)
+        config_log_frame = ttk.LabelFrame(content_frame, text=" Configuration Preview ", padding=5)
         config_log_frame.pack(fill=tk.BOTH, expand=True)
         self.config_preview_text = scrolledtext.ScrolledText(config_log_frame, font=Theme.FONT_MONO, height=5)
         self.config_preview_text.pack(fill=tk.BOTH, expand=True)
@@ -254,6 +286,7 @@ Engine Path: {self.engine_path.get()}
 Embedding Model: {self.embed_model.get()}
 Claude Model: {self.api_model.get()}
 Batch Size: {self.embed_batch_size.get()}
+Text Scale: {self.text_scale.get():.1f}x
 
 Target Directory: {self.target_dir.get()}
 GPU Support: {'Enabled' if self.gpu_support.get() else 'Disabled'}
@@ -602,6 +635,11 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     self.api_model.set(cm.get("ANTHROPIC_MODEL"))
                 if cm.get("EMBED_BATCH_SIZE"):
                     self.embed_batch_size.set(cm.get("EMBED_BATCH_SIZE"))
+                if cm.get("GUI_TEXT_SCALE"):
+                    try:
+                        self.text_scale.set(float(cm.get("GUI_TEXT_SCALE")))
+                    except:
+                        pass
             except:
                 self.vector_store_path.set(str(default_vec_path))
         else:
@@ -626,7 +664,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         self.version_warning_text = tk.Label(
             self.version_warning_frame,
             text="",
-            font=("Arial", 9),
+            font=Theme.FONT_SMALL,
             bg="#FFF3CD",
             fg="#856404",
             wraplength=700,
@@ -1044,7 +1082,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             rec_frame = tk.Frame(header_frame, bg="#d4edda", relief=tk.SOLID, bd=1)
             rec_frame.pack(fill=tk.X, pady=(5, 0))
             tk.Label(rec_frame, text=f"💡 Recommended: UE {preferred_version} (matches project)",
-                     font=("Arial", 9), bg="#d4edda", fg="#155724").pack(padx=10, pady=5)
+                     font=Theme.FONT_SMALL, bg="#d4edda", fg="#155724").pack(padx=10, pady=5)
 
         # Legend for health scores
         legend_frame = ttk.LabelFrame(dialog, text=" Health Score Legend ", padding=5)
@@ -1326,6 +1364,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 f.write(f"EMBED_MODEL={self.embed_model.get()}\n")
                 f.write(f"ANTHROPIC_MODEL={self.api_model.get()}\n")
                 f.write(f"EMBED_BATCH_SIZE={self.embed_batch_size.get()}\n")
+                f.write(f"GUI_TEXT_SCALE={self.text_scale.get():.2f}\n")
 
             # Write version file for update detection
             version_file = target / "VERSION.txt"

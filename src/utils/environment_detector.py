@@ -386,15 +386,29 @@ class ValidationPipeline:
 
     def validate(self, install: EngineInstallation) -> ValidationResult:
         """Run all validation checks"""
+        # First check: Path existence
+        path_check = self._check_path_exists(install)
+        if not path_check.passed:
+            return ValidationResult(
+                valid=False,
+                health_score=0.0,
+                issues=[path_check.issue],
+                warnings=[],
+                checks_passed=0,
+                checks_total=4
+            )
+
         checks = [
-            self._check_path_exists,
+            lambda x: path_check, # Already run
             self._check_directory_structure,
             self._check_build_version,
             self._check_source_availability
         ]
 
         results = []
-        for check in checks:
+        # Skip the first one since we already have it
+        results.append(path_check)
+        for check in checks[1:]:
             results.append(check(install))
 
         passed_checks = sum(1 for r in results if r.passed)

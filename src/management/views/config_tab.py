@@ -37,6 +37,7 @@ class ConfigTab:
         self.embed_model_var = dashboard.embed_model_var
         self.api_model_var = dashboard.api_model_var
         self.embed_batch_size_var = dashboard.embed_batch_size_var
+        self.text_scale_var = getattr(dashboard, 'text_scale_var', tk.DoubleVar(value=1.0))
 
         self.build_ui()
         self.load_current_engine_path() # Load engine path initially
@@ -46,11 +47,28 @@ class ConfigTab:
         frame = ttk.Frame(self.frame, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Instructions
-        ttk.Label(frame, text="Configure your Anthropic API key, UE5 Engine paths, and models.", font=Theme.FONT_NORMAL).pack(anchor=tk.W, pady=(0, 15))
-
-        # API Key Section
-        api_frame = ttk.LabelFrame(frame, text=" Anthropic API Key ", padding=15)
+                # Instructions
+                ttk.Label(frame, text="Configure your Anthropic API key, UE5 Engine paths, and models.", font=Theme.FONT_NORMAL).pack(anchor=tk.W, pady=(0, 15))       
+        
+                # UI Appearance Section
+                ui_frame = ttk.LabelFrame(frame, text=" UI Appearance ", padding=15)
+                ui_frame.pack(fill=tk.X, pady=(0, 15))
+        
+                ttk.Label(ui_frame, text="Text Scale:", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
+        
+                def update_scale_label(val):
+                    self.lbl_scale.config(text=f"{float(val):.1f}x")
+        
+                scale_slider = ttk.Scale(ui_frame, from_=0.8, to=2.0, variable=self.text_scale_var, command=update_scale_label)
+                scale_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        
+                self.lbl_scale = ttk.Label(ui_frame, text=f"{self.text_scale_var.get():.1f}x")
+                self.lbl_scale.pack(side=tk.LEFT)
+        
+                if hasattr(self.dashboard, 'apply_ui_scale'):
+                    ttk.Button(ui_frame, text="Apply & Restart", command=self.dashboard.apply_ui_scale).pack(side=tk.LEFT, padx=10)
+        
+                # API Key Section        api_frame = ttk.LabelFrame(frame, text=" Anthropic API Key ", padding=15)
         api_frame.pack(fill=tk.X, pady=(0, 15))
 
         ttk.Label(api_frame, text="Get your API key from: https://console.anthropic.com/settings/keys", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
@@ -89,7 +107,7 @@ class ConfigTab:
         self.engine_source_label = tk.Label(
             path_frame,
             text="",
-            font=("Arial", 8),
+            font=Theme.FONT_TINY,
             fg="#666",
             bg=Theme.BG_LIGHT,
             anchor=tk.W
@@ -286,6 +304,7 @@ class ConfigTab:
             'EMBED_MODEL': self.embed_model_var.get(),
             'ANTHROPIC_MODEL': self.api_model_var.get(),
             'EMBED_BATCH_SIZE': self.embed_batch_size_var.get(),
+            'GUI_TEXT_SCALE': f"{self.text_scale_var.get():.2f}",
         }
 
         # Validate API key

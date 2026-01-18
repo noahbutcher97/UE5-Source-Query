@@ -61,7 +61,8 @@ class TestEnvVarStrategy(unittest.TestCase):
         self.assertEqual(installations[0].version, "5.3")
 
         # Cleanup
-        test_path.parent.parent.rmdir()
+        import shutil
+        shutil.rmtree(test_path.parent.parent, ignore_errors=True)
 
     def test_detect_with_ue_root(self):
         """Test detection with UE_ROOT"""
@@ -76,7 +77,8 @@ class TestEnvVarStrategy(unittest.TestCase):
         self.assertEqual(installations[0].version, "5.4")
 
         # Cleanup
-        test_path.parent.parent.rmdir()
+        import shutil
+        shutil.rmtree(test_path.parent.parent, ignore_errors=True)
 
     def test_detect_with_parent_directory(self):
         """Test detection when env var points to parent directory"""
@@ -92,7 +94,8 @@ class TestEnvVarStrategy(unittest.TestCase):
         self.assertEqual(installations[0].engine_root, engine_path)
 
         # Cleanup
-        engine_path.parent.parent.rmdir()
+        import shutil
+        shutil.rmtree(engine_path.parent.parent, ignore_errors=True)
 
     def test_detect_with_no_env_vars(self):
         """Test detection when no env vars set"""
@@ -335,8 +338,10 @@ class TestEnvironmentDetector(unittest.TestCase):
         self.assertIsNone(cached)
 
     @patch('src.utils.environment_detector.EnvVarStrategy.detect')
+    @patch('src.utils.environment_detector.ConfigFileStrategy.detect')
     @patch('src.utils.environment_detector.RegistryStrategy.detect')
-    def test_detect_engines_merges_strategies(self, mock_registry, mock_envvar):
+    @patch('src.utils.environment_detector.CommonLocStrategy.detect')
+    def test_detect_engines_merges_strategies(self, mock_common, mock_registry, mock_config, mock_envvar):
         """Test that detect_engines merges results from all strategies"""
         engine1 = EngineInstallation(
             version="5.3",
@@ -350,7 +355,9 @@ class TestEnvironmentDetector(unittest.TestCase):
         )
 
         mock_envvar.return_value = [engine1]
+        mock_config.return_value = []
         mock_registry.return_value = [engine2]
+        mock_common.return_value = []
 
         installations = self.detector.detect_engines(use_cache=False, validate=False)
 

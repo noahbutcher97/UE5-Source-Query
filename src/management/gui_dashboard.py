@@ -18,7 +18,7 @@ sys.path.append(str(SCRIPT_DIR))
 # Universal imports that work in both dev and deployed environments
 try:
     from src.utils.gui_theme import Theme
-    from src.utils.gui_layout import WindowManager
+    from src.utils.gui_layout import WindowManager, LayoutMetrics, Responsive
     from src.utils.config_manager import ConfigManager
     from src.utils.source_manager import SourceManager
     from src.utils.engine_helper import get_available_engines, resolve_uproject_source
@@ -30,6 +30,7 @@ try:
     from src.management.services import UpdateService, SearchService, MaintenanceService
 except ImportError:
     from utils.gui_theme import Theme
+    from utils.gui_layout import WindowManager, LayoutMetrics, Responsive
     from utils.config_manager import ConfigManager
     from utils.source_manager import SourceManager
     from utils.engine_helper import get_available_engines, resolve_uproject_source
@@ -75,6 +76,7 @@ class UnifiedDashboard:
         self.embed_model_var = tk.StringVar(value=self.config_manager.get('EMBED_MODEL', 'microsoft/unixcoder-base'))
         self.api_model_var = tk.StringVar(value=self.config_manager.get('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'))
         self.embed_batch_size_var = tk.StringVar(value=self.config_manager.get('EMBED_BATCH_SIZE', '16'))
+        self.text_scale_var = tk.DoubleVar(value=float(self.config_manager.get('GUI_TEXT_SCALE', LayoutMetrics().text_scale)))
         self.query_scope_var = tk.StringVar(value="engine")
 
         # Filter variables
@@ -221,7 +223,7 @@ class UnifiedDashboard:
         env_type_label = tk.Label(
             env_type_frame,
             text="Environment Type:",
-            font=("Arial", 10, "bold"),
+            font=Theme.FONT_BOLD,
             bg=Theme.BG_LIGHT,
             fg=Theme.TEXT_DARK
         )
@@ -241,7 +243,7 @@ class UnifiedDashboard:
         env_value = tk.Label(
             env_type_frame,
             text=env_display,
-            font=("Arial", 10),
+            font=Theme.FONT_NORMAL,
             bg=env_color,
             fg="white",
             padx=10,
@@ -253,7 +255,7 @@ class UnifiedDashboard:
         validity_label = tk.Label(
             env_type_frame,
             text=f"Valid: {'✓' if is_valid else '✗'}",
-            font=("Arial", 10),
+            font=Theme.FONT_NORMAL,
             bg=Theme.BG_LIGHT,
             fg="#4CAF50" if is_valid else "#F44336"
         )
@@ -266,7 +268,7 @@ class UnifiedDashboard:
         root_label = tk.Label(
             root_frame,
             text="Root Directory:",
-            font=("Arial", 10, "bold"),
+            font=Theme.FONT_BOLD,
             bg=Theme.BG_LIGHT,
             fg=Theme.TEXT_DARK
         )
@@ -275,7 +277,7 @@ class UnifiedDashboard:
         root_value = tk.Label(
             root_frame,
             text=str(self.deployment_detector.root),
-            font=("Arial", 9),
+            font=Theme.FONT_SMALL,
             bg=Theme.BG_LIGHT,
             fg="#7F8C8D"
         )
@@ -289,7 +291,7 @@ class UnifiedDashboard:
             issues_label = tk.Label(
                 issues_frame,
                 text="Issues:",
-                font=("Arial", 10, "bold"),
+                font=Theme.FONT_BOLD,
                 bg=Theme.BG_LIGHT,
                 fg="#F44336"
             )
@@ -299,7 +301,7 @@ class UnifiedDashboard:
                 issue_text = tk.Label(
                     issues_frame,
                     text=f"  • {issue}",
-                    font=("Arial", 9),
+                    font=Theme.FONT_SMALL,
                     bg=Theme.BG_LIGHT,
                     fg="#F44336"
                 )
@@ -355,7 +357,7 @@ class UnifiedDashboard:
                 command=self.run_update,
                 bg=Theme.SECONDARY,
                 fg="white",
-                font=("Arial", 10, "bold"),
+                font=Theme.FONT_BOLD,
                 padx=20,
                 pady=8,
                 relief=tk.FLAT,
@@ -369,7 +371,7 @@ class UnifiedDashboard:
                 command=lambda: self.run_update(dry_run=True),
                 bg=Theme.BG_DARK,
                 fg="white",
-                font=("Arial", 10),
+                font=Theme.FONT_NORMAL,
                 padx=15,
                 pady=8,
                 relief=tk.FLAT,
@@ -1701,14 +1703,34 @@ class UnifiedDashboard:
         threading.Thread(target=_run, daemon=True).start()
 
     def build_config_tab(self):
-        frame = ttk.Frame(self.tab_config, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
+        # Create scrollable container using Responsive helper
+        outer_frame, frame = Responsive.make_scrollable(self.tab_config)
+        
+        # Add padding wrapper for aesthetic
+        content_frame = ttk.Frame(frame, padding=20)
+        content_frame.pack(fill=tk.BOTH, expand=True)
 
         # Instructions
-        ttk.Label(frame, text="Configure your Anthropic API key, UE5 Engine paths, and models.", font=Theme.FONT_NORMAL).pack(anchor=tk.W, pady=(0, 15))
+        ttk.Label(content_frame, text="Configure your Anthropic API key, UE5 Engine paths, and models.", font=Theme.FONT_NORMAL).pack(anchor=tk.W, pady=(0, 15))
 
+        # UI Appearance Section (New)
+        ui_frame = ttk.LabelFrame(content_frame, text=" UI Appearance ", padding=15)
+        ui_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(ui_frame, text="Text Scale:", font=Theme.FONT_BOLD).pack(side=tk.LEFT)
+
+        def update_scale_label(val):
+            self.lbl_scale.config(text=f"{float(val):.1f}x")
+
+        scale_slider = ttk.Scale(ui_frame, from_=0.8, to=2.0, variable=self.text_scale_var, command=update_scale_label)
+        scale_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+
+        self.lbl_scale = ttk.Label(ui_frame, text=f"{self.text_scale_var.get():.1f}x")
+        self.lbl_scale.pack(side=tk.LEFT)
+
+        ttk.Button(ui_frame, text="Apply & Restart", command=self.apply_ui_scale).pack(side=tk.LEFT, padx=10)
         # API Key Section
-        api_frame = ttk.LabelFrame(frame, text=" Anthropic API Key ", padding=15)
+        api_frame = ttk.LabelFrame(content_frame, text=" Anthropic API Key ", padding=15)
         api_frame.pack(fill=tk.X, pady=(0, 15))
 
         ttk.Label(api_frame, text="Get your API key from: https://console.anthropic.com/settings/keys", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
@@ -1722,14 +1744,14 @@ class UnifiedDashboard:
         ttk.Button(api_frame, text="Show", command=self.toggle_api_visibility).pack(side=tk.LEFT)
 
         # Vector Storage
-        ttk.Label(frame, text="Vector Storage Directory", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
-        vec_frame = ttk.Frame(frame)
+        ttk.Label(content_frame, text="Vector Storage Directory", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=(0,5))
+        vec_frame = ttk.Frame(content_frame)
         vec_frame.pack(fill=tk.X, pady=(0, 20))
         ttk.Entry(vec_frame, textvariable=self.vector_store_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(vec_frame, text="Browse...", command=self.browse_vector_store).pack(side=tk.LEFT)
         
         # UE5 Path Section
-        path_frame = ttk.LabelFrame(frame, text=" UE5 Engine Path ", padding=15)
+        path_frame = ttk.LabelFrame(content_frame, text=" UE5 Engine Path ", padding=15)
         path_frame.pack(fill=tk.X, pady=(0, 15))
 
         ttk.Label(path_frame, text="This is auto-detected. Only change if incorrect.", font=Theme.FONT_NORMAL, foreground="#666").pack(anchor=tk.W, pady=(0, 8))
@@ -1756,7 +1778,7 @@ class UnifiedDashboard:
         self._update_engine_source_indicator()
 
         # Model Selection Section
-        model_frame = ttk.LabelFrame(frame, text=" Model Settings ", padding=15)
+        model_frame = ttk.LabelFrame(content_frame, text=" Model Settings ", padding=15)
         model_frame.pack(fill=tk.X, pady=(0, 15))
 
         ttk.Label(model_frame, text="Embedding Model:", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=5)
@@ -1770,7 +1792,7 @@ class UnifiedDashboard:
         api_model_combo.pack(fill=tk.X)
 
         # GPU Optimization Section
-        gpu_frame = ttk.LabelFrame(frame, text=" GPU Optimization ", padding=15)
+        gpu_frame = ttk.LabelFrame(content_frame, text=" GPU Optimization ", padding=15)
         gpu_frame.pack(fill=tk.X, pady=(0, 15))
 
         ttk.Label(gpu_frame, text="Embedding Batch Size:", font=Theme.FONT_BOLD).pack(anchor=tk.W, pady=5)
@@ -1781,7 +1803,7 @@ class UnifiedDashboard:
         ttk.Label(gpu_frame, text="Smaller batches = more stable, larger batches = faster (if no errors)", font=Theme.FONT_NORMAL, foreground="#666", wraplength=500).pack(anchor=tk.W, pady=(5, 0))
 
         # Action Buttons
-        button_frame = tk.Frame(frame, bg=Theme.BG_LIGHT)
+        button_frame = tk.Frame(content_frame, bg=Theme.BG_LIGHT)
         button_frame.pack(pady=20)
 
         ttk.Button(
@@ -1799,12 +1821,25 @@ class UnifiedDashboard:
         ).pack(side=tk.LEFT)
         
         # Log for config operations
-        config_log_frame = ttk.LabelFrame(frame, text=" Configuration Log ", padding=5)
+        config_log_frame = ttk.LabelFrame(content_frame, text=" Configuration Log ", padding=5)
         config_log_frame.pack(fill=tk.BOTH, expand=True)
         self.config_log_text = scrolledtext.ScrolledText(config_log_frame, font=Theme.FONT_MONO, height=5)
         self.config_log_text.pack(fill=tk.BOTH, expand=True)
 
         self.load_current_engine_path() # Load engine path initially
+
+    def apply_ui_scale(self):
+        new_scale = self.text_scale_var.get()
+        LayoutMetrics().set_text_scale(new_scale)
+        
+        # Save to config immediately so restart uses it
+        self.config_manager.set('GUI_TEXT_SCALE', f"{new_scale:.2f}")
+        self.config_manager.save(self.config_manager._config)
+        
+        if messagebox.askyesno("Restart Required", "UI scale saved. Restart now to apply changes?"):
+            self.root.destroy()
+            import os
+            subprocess.Popen([sys.executable, str(Path(__file__))])
 
     def log_config(self, message, clear=False, append=False):
         self.config_log_text.config(state=tk.NORMAL)
@@ -1939,6 +1974,7 @@ class UnifiedDashboard:
             'EMBED_MODEL': self.embed_model_var.get(),
             'ANTHROPIC_MODEL': self.api_model_var.get(),
             'EMBED_BATCH_SIZE': self.embed_batch_size_var.get(),
+            'GUI_TEXT_SCALE': f"{self.text_scale_var.get():.2f}",
         }
 
         # Validate API key

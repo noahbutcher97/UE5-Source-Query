@@ -7,6 +7,81 @@ import tkinter as tk
 from tkinter import ttk
 import platform
 import ctypes
+import json
+from pathlib import Path
+from src.utils.gui_theme import Theme
+
+class GUIPrefs:
+    """Manages persistent GUI preferences"""
+    def __init__(self):
+        self.config_dir = Path(__file__).parent.parent.parent / "config"
+        self.prefs_file = self.config_dir / "gui_prefs.json"
+        self.env_file = self.config_dir / ".env"
+        self._prefs = {"text_scale": 1.0}
+        self.load()
+
+    def _load_from_env(self):
+        """Try to load text scale from .env for consistency"""
+        if self.env_file.exists():
+            try:
+                with open(self.env_file, 'r') as f:
+                    for line in f:
+                        if "GUI_TEXT_SCALE=" in line:
+                            val = line.split("=")[1].strip()
+                            self._prefs["text_scale"] = float(val)
+                            return True
+            except Exception:
+                pass
+        return False
+
+    def load(self):
+        # 1. Start with defaults
+        self._prefs = {"text_scale": 1.0}
+        
+        # 2. Try .env (primary source for tool config)
+        self._load_from_env()
+        
+        # 3. Try gui_prefs.json (override/supplement)
+        if self.prefs_file.exists():
+            try:
+                with open(self.prefs_file, 'r') as f:
+                    data = json.load(f)
+                    self._prefs.update(data)
+            except Exception:
+                pass
+
+    def save(self):
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Save to json
+            with open(self.prefs_file, 'w') as f:
+                json.dump(self._prefs, f, indent=2)
+            
+            # Also update .env if it exists to keep in sync
+            if self.env_file.exists():
+                lines = self.env_file.read_text().splitlines()
+                new_lines = []
+                found = False
+                for line in lines:
+                    if line.startswith("GUI_TEXT_SCALE="):
+                        new_lines.append(f"GUI_TEXT_SCALE={self.text_scale:.2f}")
+                        found = True
+                    else:
+                        new_lines.append(line)
+                if not found:
+                    new_lines.append(f"GUI_TEXT_SCALE={self.text_scale:.2f}")
+                self.env_file.write_text("\n".join(new_lines) + "\n")
+        except Exception:
+            pass
+
+    @property
+    def text_scale(self):
+        return self._prefs.get("text_scale", 1.0)
+
+    @text_scale.setter
+    def text_scale(self, value):
+        self._prefs["text_scale"] = float(value)
+        self.save()
 
 class LayoutMetrics:
     """
@@ -25,53 +100,82 @@ class LayoutMetrics:
         if self._initialized:
             return
         
+        self.prefs = GUIPrefs()
         self.scale_factor = self._get_scale_factor(root)
+        self.text_scale = self.prefs.text_scale
         self._initialize_metrics()
         self._initialized = True
+
+    def refresh(self):
+        """Reload prefs and recalculate metrics"""
+        self.prefs.load()
+        self.text_scale = self.prefs.text_scale
+        self._initialize_metrics()
+
+    def set_text_scale(self, scale):
+        """Update text scale and persist"""
+        self.text_scale = scale
+        self.prefs.text_scale = scale
+        self._initialize_metrics()
 
     def _get_scale_factor(self, root):
         """Detect DPI scaling factor"""
         try:
-            # Windows DPI awareness
+            # Windows DPI awareness - should be called BEFORE any window is created
+            # but we call it here just in case.
             if platform.system() == "Windows":
                 try:
+                    # Shcore is newer, preferred over user32
                     ctypes.windll.shcore.SetProcessDpiAwareness(1)
                 except Exception:
-                    pass
+                    try:
+                        ctypes.windll.user32.SetProcessDPIAware()
+                    except Exception:
+                        pass
             
             if root:
                 # 72 is default tk dpi, 96 is standard. 
-                # On high-DPI screens this might range 120-192+
+                # winfo_fpixels('1i') returns pixels per inch.
                 dpi = root.winfo_fpixels('1i')
-                return dpi / 72.0
+                # Base scale on 96 DPI standard
+                factor = dpi / 96.0
+                return max(1.0, factor)
         except Exception:
             pass
         return 1.0
 
     def _initialize_metrics(self):
         """Quantify spacing metrics based on scale"""
-        s = self.scale_factor
+        # Combine DPI scaling with User Preference Text Scale
+        s = self.scale_factor * self.text_scale
         
         # Spacing / Padding
-        self.PAD_XS = int(2 * s)
-        self.PAD_S = int(5 * s)
-        self.PAD_M = int(10 * s)
-        self.PAD_L = int(20 * s)
-        self.PAD_XL = int(30 * s)
+        self.PAD_XS = max(2, int(4 * s))
+        self.PAD_S = max(4, int(8 * s))
+        self.PAD_M = max(8, int(16 * s))
+        self.PAD_L = max(16, int(24 * s))
+        self.PAD_XL = max(24, int(32 * s))
         
         # Component Sizes
         self.BTN_HEIGHT = int(30 * s)
         self.ENTRY_HEIGHT = int(25 * s)
-        self.SCROLLBAR_WIDTH = int(15 * s)
+        self.SCROLLBAR_WIDTH = max(12, int(16 * s))
         
         # Typography (Points)
-        # We generally don't scale font points linearly with DPI if the OS handles it,
-        # but for pixel-based calculations we need to know.
-        # Here we define relative sizes.
-        self.FONT_S = 9
-        self.FONT_M = 10
-        self.FONT_L = 12
-        self.FONT_XL = 16
+        # Fonts in Tkinter usually scale with DPI automatically if negative,
+        # or points if positive. We use points * text_scale.
+        # We DO NOT apply scale_factor here usually because OS handles font DPI,
+        # but we DO apply user preference text_scale.
+        
+        base_s = 9
+        base_m = 10
+        base_l = 12
+        base_xl = 16
+        
+        self.FONT_S = max(8, int(base_s * self.text_scale))
+        self.FONT_M = max(9, int(base_m * self.text_scale))
+        self.FONT_L = max(11, int(base_l * self.text_scale))
+        self.FONT_XL = max(14, int(base_xl * self.text_scale))
 
     def get_font(self, size_key, weight="normal"):
         """Get font tuple based on semantic key"""
@@ -88,14 +192,6 @@ class WindowManager:
     def setup_window(window, title, target_width_pct=0.7, target_height_pct=0.7, min_w=800, min_h=600):
         """
         Apply dynamic layout rules to a window.
-        
-        Args:
-            window: The Toplevel or Tk instance
-            title: Window title
-            target_width_pct: Target width as percentage of screen (0.0-1.0)
-            target_height_pct: Target height as percentage of screen
-            min_w: Minimum width in logical pixels
-            min_h: Minimum height in logical pixels
         """
         window.title(title)
         
@@ -107,8 +203,11 @@ class WindowManager:
         
         # Apply scaling constraints
         metrics = LayoutMetrics(window)
-        scaled_min_w = int(min_w * metrics.scale_factor)
-        scaled_min_h = int(min_h * metrics.scale_factor)
+        # Apply global scale to min constraints
+        s = metrics.scale_factor * metrics.text_scale
+        
+        scaled_min_w = int(min_w * s)
+        scaled_min_h = int(min_h * s)
         
         # Calculate optimal geometry
         width = int(screen_w * target_width_pct)
@@ -124,19 +223,11 @@ class WindowManager:
         
         # Prevent top-left hidden under taskbars/menus
         x = max(0, x)
-        y = max(30, y) # Reserve space for title bars
+        y = max(30, y)
         
         # Apply
         window.minsize(scaled_min_w, scaled_min_h)
         window.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Bind resize events for responsive adjustments if needed
-        # window.bind('<Configure>', lambda e: WindowManager._on_resize(window, e))
-
-    @staticmethod
-    def _on_resize(window, event):
-        # Placeholder for dynamic text wrapping or layout reflow logic
-        pass
 
 class Responsive:
     """
@@ -146,31 +237,49 @@ class Responsive:
     @staticmethod
     def make_scrollable(parent):
         """
-        Wrap a frame in a canvas to ensure accessibility on small screens.
+        Wrap a frame in a canvas to ensure accessibility.
         Returns: (outer_frame, scrollable_content_frame)
         """
+        # Outer container (holds canvas + scrollbar)
         outer_frame = ttk.Frame(parent)
+        outer_frame.pack(fill=tk.BOTH, expand=True) # Ensure it fills parent
         
-        canvas = tk.Canvas(outer_frame, highlightthickness=0)
+        canvas = tk.Canvas(outer_frame, highlightthickness=0, bg=Theme.BG_LIGHT if hasattr(Theme, 'BG_LIGHT') else '#f0f0f0')
         scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=canvas.yview)
+        
+        # Content frame (inside canvas)
         scrollable_frame = ttk.Frame(canvas)
         
+        # Logic to resize content frame to canvas width
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # Create window in canvas
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        
+        # Force frame width to match canvas
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas.bind("<Configure>", on_canvas_configure)
+        
         canvas.configure(yscrollcommand=scrollbar.set)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Mousewheel binding
+        # Mousewheel binding (Windows/Linux)
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
             
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Bind to canvas and all children
+        # Note: In Tkinter, binding to 'all' can be heavy, but for this specific tree it's often necessary
+        # A better approach is usually binding to the canvas and ensuring focus, 
+        # but bind_all is robust for dialogs.
+        scrollable_frame.bind("<Enter>", lambda _: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        scrollable_frame.bind("<Leave>", lambda _: canvas.unbind_all("<MouseWheel>"))
         
         return outer_frame, scrollable_frame
 
@@ -179,19 +288,26 @@ class Responsive:
         """Create a text area that respects visual hierarchy"""
         frame = ttk.Frame(parent)
         
-        font = metrics.get_font("M", "normal") # Monospace usually better for logs?
+        font = metrics.get_font("M", "normal")
         if "Consolas" not in font: 
              font = ("Consolas", metrics.FONT_M)
 
-        text = scrolledtext.ScrolledText(
+        text = tk.Text( # Use standard Text for better font control
             frame,
             height=height,
             font=font,
             wrap=tk.WORD,
             padx=metrics.PAD_M,
             pady=metrics.PAD_S,
-            borderwidth=0
+            borderwidth=0,
+            relief=tk.FLAT
         )
-        text.pack(fill=tk.BOTH, expand=True)
+        
+        # Add scrollbar
+        sb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=sb.set)
+        
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        
         return frame, text
-
