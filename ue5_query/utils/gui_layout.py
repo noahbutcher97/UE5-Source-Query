@@ -177,6 +177,12 @@ class LayoutMetrics:
         self.FONT_L = max(11, int(base_l * self.text_scale))
         self.FONT_XL = max(14, int(base_xl * self.text_scale))
 
+        # Treeview Row Height (Crucial for High DPI)
+        # Needs to accommodate FONT_M + padding
+        # Scale factor usage here depends on if font size is in pixels or points
+        # Assuming FONT_M is points, roughly * 1.33 for pixels + padding
+        self.TREE_ROW_HEIGHT = int((self.FONT_M * 1.8) + (10 * self.text_scale))
+
     def get_font(self, size_key, weight="normal"):
         """Get font tuple based on semantic key"""
         size = getattr(self, f"FONT_{size_key}", 10)

@@ -63,6 +63,16 @@ class Theme:
         style.configure("TLabelframe", background=Theme.BG_LIGHT)
         style.configure("TLabelframe.Label", background=Theme.BG_LIGHT, font=Theme.FONT_BOLD)
 
+        # Treeview (Fix for scaling issues)
+        style.configure("Treeview", 
+            background="white", 
+            foreground=Theme.TEXT_DARK, 
+            fieldbackground="white",
+            rowheight=metrics.TREE_ROW_HEIGHT,
+            font=Theme.FONT_NORMAL
+        )
+        style.configure("Treeview.Heading", font=Theme.FONT_BOLD)
+
         # Accent Button
         style.configure(
             "Accent.TButton",

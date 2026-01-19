@@ -1035,6 +1035,19 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 # Sort by health score (descending)
                 installations.sort(key=lambda x: x.get('health_score', 0), reverse=True)
 
+                # Determine best candidate to pre-select
+                best_candidate = installations[0]
+                if preferred_version:
+                    for inst in installations:
+                        if preferred_version in inst.get('version', ''):
+                            best_candidate = inst
+                            break
+                
+                # Pre-populate the field with the best candidate
+                self.root.after(0, lambda p=best_candidate['engine_root']: self.engine_path.set(p))
+                self.root.after(0, lambda v=best_candidate['version']: 
+                    self.log(f"✓ Auto-selected best match: {v} (you can change this in the dialog)"))
+
                 # Show version selector so user can override auto-selection
                 self.root.after(0, lambda pv=preferred_version:
                     self.show_version_selector(installations, preferred_version=pv))
