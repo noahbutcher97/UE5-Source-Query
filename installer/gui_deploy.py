@@ -377,6 +377,9 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 self.engine_listbox.insert(tk.END, resolved)
             else:
                 self.engine_listbox.insert(tk.END, d)
+        
+        # Update preview to reflect count change
+        self.update_config_preview()
 
     def add_engine_dir(self):
         engine_root = self.engine_path.get().strip()
@@ -464,11 +467,20 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         self.log_text = scrolledtext.ScrolledText(frame, font=Theme.FONT_MONO, height=15)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+        # Add traces to keep preview live
+        self.engine_path.trace_add("write", lambda *args: self.update_config_preview())
+        self.target_dir.trace_add("write", lambda *args: self.update_config_preview())
+        self.gpu_support.trace_add("write", lambda *args: self.update_config_preview())
+
         # Initial preview update
         self.root.after(500, self.update_config_preview)
 
     def update_config_preview(self):
         """Update the configuration preview panel with current settings."""
+        # Safety check: ensure UI elements exist
+        if not hasattr(self, 'preview_labels') or not self.preview_labels:
+            return
+
         # Target directory
         target = self.target_dir.get()
         if target:
@@ -917,6 +929,9 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         self.project_listbox.delete(0, tk.END)
         for p in self.project_dirs:
             self.project_listbox.insert(tk.END, p)
+        
+        # Update preview to reflect count change
+        self.update_config_preview()
 
     def auto_detect_engine(self, silent=False):
         """
