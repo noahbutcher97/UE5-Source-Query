@@ -82,5 +82,80 @@ class TestQueryIntentAnalyzer(unittest.TestCase):
         self.assertEqual(intent.entity_type, EntityType.FUNCTION)
         self.assertEqual(intent.entity_name, "LineTraceSingleByChannel")
 
+    # --- New Tests Implemented Below ---
+
+    def test_default_semantic_fallback(self):
+        """Test queries that mention an entity but aren't defs or conceptual"""
+        # "FVector math calculation" -> Semantic search with entity enhancement
+        # It's not a definition query, not purely conceptual (no "how", "why"), but has an entity.
+        intent = self.analyzer.analyze("FVector math calculation")
+        self.assertEqual(intent.query_type, QueryType.SEMANTIC)
+        self.assertEqual(intent.confidence, 0.5)
+        # Should still get basic struct keywords in enhancement
+        self.assertIn("struct", intent.enhanced_query)
+
+    def test_enhance_query_variations(self):
+        """Test query enhancement for different entity types and context"""
+        # Class methods
+        # "AActor methods" -> Hybrid or Definition?
+        # "methods" is in DEFINITION_KEYWORDS, so it triggers Hybrid path
+        intent = self.analyzer.analyze("AActor methods")
+        self.assertEqual(intent.query_type, QueryType.HYBRID)
+        self.assertIn("UFUNCTION", intent.enhanced_query)
+
+        # Enum values
+        # "list ECollisionChannel values please" -> Semantic (values not in DEF_KEYWORDS, long enough query)
+        intent = self.analyzer.analyze("list ECollisionChannel values please")
+        self.assertEqual(intent.query_type, QueryType.SEMANTIC) 
+        self.assertIn("UENUM", intent.enhanced_query)
+        self.assertIn("values", intent.enhanced_query)
+
+        # Function parameters
+        # "LineTraceSingleByChannel parameters" -> Hybrid (parameters is in DEFINITION_KEYWORDS)
+        intent = self.analyzer.analyze("LineTraceSingleByChannel parameters")
+        self.assertEqual(intent.query_type, QueryType.HYBRID)
+        self.assertIn("UFUNCTION", intent.enhanced_query)
+        
+    def test_pattern_variations(self):
+        """Test various definition pattern permutations"""
+        variations = [
+            ("what is FHitResult", EntityType.STRUCT, "FHitResult"),
+            ("define AActor", EntityType.CLASS, "AActor"),
+            ("find ECollisionChannel", EntityType.ENUM, "ECollisionChannel"),
+            ("show me FVector", EntityType.STRUCT, "FVector"),
+        ]
+        for q, expected_type, expected_name in variations:
+            intent = self.analyzer.analyze(q)
+            self.assertEqual(intent.query_type, QueryType.DEFINITION, f"Failed for '{q}'")
+            self.assertEqual(intent.entity_type, expected_type)
+            self.assertEqual(intent.entity_name, expected_name)
+
+    def test_case_sensitivity(self):
+        """Test case insensitivity for keywords"""
+        intent = self.analyzer.analyze("STRUCT FHitResult")
+        self.assertEqual(intent.query_type, QueryType.DEFINITION)
+        
+        intent = self.analyzer.analyze("struct FHitResult")
+        self.assertEqual(intent.query_type, QueryType.DEFINITION)
+
+    def test_bare_entity_edge_cases(self):
+        """Test bare entity logic with too many words"""
+        # "The FVector usage is amazing" -> >2 significant words
+        # Changed from "FVector struct" to avoid regex match
+        q = "The FVector usage is amazing"
+        intent = self.analyzer.analyze(q)
+        # Should NOT be bare definition (0.85 conf)
+        self.assertNotEqual(intent.confidence, 0.85, "Should not trigger bare entity definition")
+        self.assertEqual(intent.query_type, QueryType.SEMANTIC)
+
+    def test_empty_input(self):
+        """Test empty or whitespace input"""
+        intent = self.analyzer.analyze("")
+        # Should return default semantic with low confidence
+        self.assertEqual(intent.query_type, QueryType.SEMANTIC)
+        
+        intent = self.analyzer.analyze("   ")
+        self.assertEqual(intent.query_type, QueryType.SEMANTIC)
+
 if __name__ == '__main__':
     unittest.main()

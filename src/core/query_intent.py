@@ -205,8 +205,11 @@ class QueryIntentAnalyzer:
 
                     # Map to EntityType
                     entity_type = EntityType.UNKNOWN
-                    if any(x in keyword_str for x in ['struct', 'define', 'definition']):
+                    if 'struct' in keyword_str:
                         entity_type = EntityType.STRUCT
+                    elif any(x in keyword_str for x in ['define', 'definition']):
+                        # Leave as UNKNOWN to infer from name later
+                        pass
                     elif 'class' in keyword_str:
                         entity_type = EntityType.CLASS
                     elif 'enum' in keyword_str:

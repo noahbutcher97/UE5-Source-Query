@@ -142,10 +142,17 @@ def run_all_tests():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             if hasattr(module, 'run_tests'):
-                module.run_tests()
-            print("[SUCCESS] GUI smoke test passed\n")
-            total_passed += 1
-            test_suites.append(("GUI Smoke", "PASS"))
+                if module.run_tests():
+                    print("[SUCCESS] GUI smoke test passed\n")
+                    total_passed += 1
+                    test_suites.append(("GUI Smoke", "PASS"))
+                else:
+                    print("[FAILED] GUI smoke test returned failure\n")
+                    total_failed += 1
+                    test_suites.append(("GUI Smoke", "FAIL"))
+            else:
+                print("[SKIP] GUI smoke test module has no run_tests function\n")
+                test_suites.append(("GUI Smoke", "SKIP"))
         else:
             print("[SKIP] GUI smoke test file not found\n")
             test_suites.append(("GUI Smoke", "SKIP"))
