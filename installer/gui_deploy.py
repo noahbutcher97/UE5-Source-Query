@@ -85,6 +85,9 @@ class DeploymentWizard:
         self.engine_path.trace_add("write", lambda *args: self.refresh_engine_list())
         
         self.check_existing_install() 
+        
+        # Initial silent auto-detect to populate config if empty
+        self.root.after(500, lambda: self.auto_detect_engine(silent=True))
 
     def get_tool_version(self):
         """Get version from ue5_query/__init__.py"""
@@ -915,7 +918,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         for p in self.project_dirs:
             self.project_listbox.insert(tk.END, p)
 
-    def auto_detect_engine(self):
+    def auto_detect_engine(self, silent=False):
         """
         Priority-based engine detection:
         1. Vector store (if index exists) - ensures consistency
@@ -923,10 +926,11 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         3. Config file
         4. Auto-detection (newest version)
 
-        ALWAYS shows the selection dialog to allow user choice.
+        ALWAYS shows the selection dialog to allow user choice, unless silent=True.
         """
-        self.log("Detecting UE5 installations (priority-based)...")
-        self.path_entry.config(state=tk.DISABLED)
+        if not silent:
+            self.log("Detecting UE5 installations (priority-based)...")
+            self.path_entry.config(state=tk.DISABLED)
 
         def detect():
             try:
@@ -937,26 +941,27 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 # PRIORITY 1: Vector Store (if deployment has existing index)
                 # ═══════════════════════════════════════════════════════════════════
                 if target_dir and (target_dir / "data" / "vector_meta.json").exists():
-                    self.root.after(0, lambda: self.log("  [1/4] Checking vector store..."))
+                    if not silent: self.root.after(0, lambda: self.log("  [1/4] Checking vector store..."))
                     vector_engine = detect_engine_from_vector_store(target_dir)
                     if vector_engine:
                         path = vector_engine.get('engine_root')
                         version = vector_engine.get('version', 'unknown')
                         if path and Path(path).exists():
-                            self.root.after(0, lambda p=path, v=version:
-                                self.log(f"  Found from vector store: {v}"))
+                            if not silent:
+                                self.root.after(0, lambda p=path, v=version:
+                                    self.log(f"  Found from vector store: {v}"))
                             # Extract version number for preference (e.g. "UE_5.3" -> "5.3")
                             import re
                             match = re.search(r'(\d+\.\d+)', version)
                             if match:
                                 preferred_version = match.group(1)
                 else:
-                    self.root.after(0, lambda: self.log("  [1/4] No vector store found"))
+                    if not silent: self.root.after(0, lambda: self.log("  [1/4] No vector store found"))
 
                 # ═══════════════════════════════════════════════════════════════════
                 # PRIORITY 2: .uproject file in deployment area
                 # ═══════════════════════════════════════════════════════════════════
-                self.root.after(0, lambda: self.log("  [2/4] Checking for .uproject..."))
+                if not silent: self.root.after(0, lambda: self.log("  [2/4] Checking for .uproject..."))
                 project_engine_version = None
                 uproject = None
 
@@ -965,15 +970,16 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     if uproject:
                         project_engine_version = get_engine_version_from_uproject(str(uproject))
                         if project_engine_version:
-                            self.root.after(0, lambda p=uproject.name, v=project_engine_version:
-                                self.log(f"  Found project: {p} (requires UE {v})"))
+                            if not silent:
+                                self.root.after(0, lambda p=uproject.name, v=project_engine_version:
+                                    self.log(f"  Found project: {p} (requires UE {v})"))
                             # Project overrides vector store preference
                             preferred_version = project_engine_version
 
                 # ═══════════════════════════════════════════════════════════════════
                 # PRIORITY 3: Config file (user's previous selection)
                 # ═══════════════════════════════════════════════════════════════════
-                self.root.after(0, lambda: self.log("  [3/4] Checking config file..."))
+                if not silent: self.root.after(0, lambda: self.log("  [3/4] Checking config file..."))
                 config_engine = None
                 config_file = target_dir / "config" / ".env" if target_dir else None
 
@@ -992,8 +998,9 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                                                 'version': f"UE_{match.group(1)}",
                                                 'source': 'config'
                                             }
-                                            self.root.after(0, lambda v=config_engine['version']:
-                                                self.log(f"  Found in config: {v}"))
+                                            if not silent:
+                                                self.root.after(0, lambda v=config_engine['version']:
+                                                    self.log(f"  Found in config: {v}"))
                                             
                                             # Config is fallback preference
                                             if not preferred_version:
@@ -1005,7 +1012,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 # ═══════════════════════════════════════════════════════════════════
                 # PRIORITY 4: Auto-detection with health scores
                 # ═══════════════════════════════════════════════════════════════════
-                self.root.after(0, lambda: self.log("  [4/4] Scanning system for UE5 installations..."))
+                if not silent: self.root.after(0, lambda: self.log("  [4/4] Scanning system for UE5 installations..."))
                 installations = get_available_engines(self.source_dir, use_cache=True)
 
                 if not installations:
@@ -1013,23 +1020,26 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                     if config_engine:
                         # But we have a config entry - use it
                         self.root.after(0, lambda p=config_engine['path']: self.engine_path.set(p))
-                        self.root.after(0, lambda v=config_engine['version']:
-                            self.log(f"✓ Using config engine: {v}"))
+                        if not silent:
+                            self.root.after(0, lambda v=config_engine['version']:
+                                self.log(f"✓ Using config engine: {v}"))
                         return
 
-                    self.root.after(0, lambda: self.log("! No UE5 installation detected"))
-                    self.root.after(0, lambda: self.show_detection_help_dialog())
+                    if not silent:
+                        self.root.after(0, lambda: self.log("! No UE5 installation detected"))
+                        self.root.after(0, lambda: self.show_detection_help_dialog())
                     return
 
                 # Log all found installations
-                for inst in installations:
-                    health_pct = int(inst.get('health_score', 0) * 100)
-                    source = inst.get('source', 'unknown')
-                    self.root.after(0, lambda v=inst['version'], s=source, h=health_pct:
-                        self.log(f"  Found {v} ({s}) - Health: {h}%"))
+                if not silent:
+                    for inst in installations:
+                        health_pct = int(inst.get('health_score', 0) * 100)
+                        source = inst.get('source', 'unknown')
+                        self.root.after(0, lambda v=inst['version'], s=source, h=health_pct:
+                            self.log(f"  Found {v} ({s}) - Health: {h}%"))
 
                 # ═══════════════════════════════════════════════════════════════════
-                # SHOW SELECTION DIALOG (Always)
+                # SHOW SELECTION DIALOG (Always unless silent)
                 # ═══════════════════════════════════════════════════════════════════
                 
                 # Sort by health score (descending)
@@ -1044,19 +1054,24 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                             break
                 
                 # Pre-populate the field with the best candidate
-                self.root.after(0, lambda p=best_candidate['engine_root']: self.engine_path.set(p))
-                self.root.after(0, lambda v=best_candidate['version']: 
-                    self.log(f"✓ Auto-selected best match: {v} (you can change this in the dialog)"))
+                if not self.engine_path.get() or not silent:
+                    self.root.after(0, lambda p=best_candidate['engine_root']: self.engine_path.set(p))
+                
+                if not silent:
+                    self.root.after(0, lambda v=best_candidate['version']: 
+                        self.log(f"✓ Auto-selected best match: {v} (you can change this in the dialog)"))
 
-                # Show version selector so user can override auto-selection
-                self.root.after(0, lambda pv=preferred_version:
-                    self.show_version_selector(installations, preferred_version=pv))
+                    # Show version selector so user can override auto-selection
+                    self.root.after(0, lambda pv=preferred_version:
+                        self.show_version_selector(installations, preferred_version=pv))
 
             except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log(f"✗ Detection failed: {err}"))
-                self.root.after(0, lambda err=str(e): messagebox.showerror("Error", f"Auto-detection failed:\n{err}"))
+                if not silent:
+                    self.root.after(0, lambda err=str(e): self.log(f"✗ Detection failed: {err}"))
+                    self.root.after(0, lambda err=str(e): messagebox.showerror("Error", f"Auto-detection failed:\n{err}"))
             finally:
-                self.root.after(0, lambda: self.path_entry.config(state=tk.NORMAL))
+                if not silent:
+                    self.root.after(0, lambda: self.path_entry.config(state=tk.NORMAL))
 
         threading.Thread(target=detect, daemon=True).start()
 

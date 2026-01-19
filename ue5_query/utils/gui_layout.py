@@ -234,6 +234,32 @@ class WindowManager:
         # Apply
         window.minsize(scaled_min_w, scaled_min_h)
         window.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Dynamic Resizing Adjustment
+        # Check if content needs more space after widgets are realized
+        def adjust_size():
+            window.update_idletasks()
+            req_w = window.winfo_reqwidth()
+            req_h = window.winfo_reqheight()
+            
+            current_w = window.winfo_width()
+            current_h = window.winfo_height()
+            
+            new_w = max(current_w, req_w)
+            new_h = max(current_h, req_h)
+            
+            # Cap at screen size
+            new_w = min(new_w, screen_w - 50)
+            new_h = min(new_h, screen_h - 50)
+            
+            if new_w > current_w or new_h > current_h:
+                # Re-center if resizing
+                new_x = (screen_w - new_w) // 2
+                new_y = (screen_h - new_h) // 2
+                window.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
+                
+        # Run adjustment shortly after startup
+        window.after(100, adjust_size)
 
 class Responsive:
     """
