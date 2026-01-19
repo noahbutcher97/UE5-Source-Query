@@ -87,9 +87,9 @@ class DeploymentWizard:
         self.check_existing_install() 
 
     def get_tool_version(self):
-        """Get version from src/__init__.py"""
+        """Get version from ue5_query/__init__.py"""
         try:
-            init_file = self.source_dir / "src" / "__init__.py"
+            init_file = self.source_dir / "ue5_query" / "__init__.py"
             if init_file.exists():
                 content = init_file.read_text()
                 import re
@@ -101,7 +101,7 @@ class DeploymentWizard:
         return "2.0.0"  # Fallback version
 
     def load_default_engine_dirs(self):
-        template_path = self.source_dir / "src" / "indexing" / "EngineDirs.template.txt"
+        template_path = self.source_dir / "ue5_query" / "indexing" / "EngineDirs.template.txt"
         if template_path.exists():
             with open(template_path, 'r') as f:
                 self.engine_dirs = [line.strip() for line in f if line.strip() and not line.startswith('#')]
@@ -1327,8 +1327,8 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             target.mkdir(parents=True, exist_ok=True)
             
             # Use simplified copy logic similar to previous script
-            # Copy src, config, tools, docs
-            for item in ["src", "config", "tools", "docs", "ask.bat", "launcher.bat", "requirements.txt", ".indexignore"]:
+            # Copy ue5_query, config, tools, docs
+            for item in ["ue5_query", "config", "tools", "docs", "ask.bat", "launcher.bat", "requirements.txt", ".indexignore", "pyproject.toml"]:
                 src = self.source_dir / item
                 dst = target / item
                 if not src.exists():
@@ -1403,7 +1403,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         dirs_to_write.append(d)
 
                 # Write all engine dirs at once
-                output = target / "src" / "indexing" / "EngineDirs.txt"
+                output = target / "ue5_query" / "indexing" / "EngineDirs.txt"
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, 'w') as f:
                     f.write(f"# Auto-generated for Engine Root: {engine_root}\n")
@@ -1441,7 +1441,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 self.log(f"Configuring {len(project_dirs_final)} project directories via SourceManager...")
                 # Use SourceManager for consistent file handling
                 target_source_manager = SourceManager(target)
-                output = target / "src" / "indexing" / "ProjectDirs.txt"
+                output = target / "ue5_query" / "indexing" / "ProjectDirs.txt"
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, 'w') as f:
                     f.write("# Auto-generated Project Directories\n")
@@ -1456,6 +1456,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             pip = target / ".venv" / "Scripts" / "pip.exe"
             self.log("Installing dependencies...")
             subprocess.run([str(pip), "install", "-r", str(target / "requirements.txt")])
+
+            # Install project as package
+            self.log("Installing ue5-source-query package...")
+            subprocess.run([str(pip), "install", "-e", str(target)])
 
             # 5b. GPU Support - Install CUDA and GPU-accelerated packages
             if self.gpu_support.get():
