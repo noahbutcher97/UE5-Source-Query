@@ -19,17 +19,17 @@ import json
 SCRIPT_DIR = Path(__file__).parent.parent
 sys.path.append(str(SCRIPT_DIR))
 
-from src.utils.gui_theme import Theme
-from src.utils.gui_layout import WindowManager, LayoutMetrics, Responsive
-from src.utils.config_manager import ConfigManager
-from src.utils.source_manager import SourceManager
-from src.utils.engine_helper import (
+from ue5_query.utils.gui_theme import Theme
+from ue5_query.utils.gui_layout import WindowManager, LayoutMetrics, Responsive
+from ue5_query.utils.config_manager import ConfigManager
+from ue5_query.utils.source_manager import SourceManager
+from ue5_query.utils.engine_helper import (
     get_available_engines, resolve_uproject_source, get_smart_engine_path,
     find_uproject_in_directory, get_engine_version_from_uproject, detect_engine_from_vector_store
 )
-from src.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
-from src.utils.cuda_installer import install_cuda_with_progress, create_gpu_requirements_file
-from src.utils import gui_helpers
+from ue5_query.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_gpu_requirements_text
+from ue5_query.utils.cuda_installer import install_cuda_with_progress, create_gpu_requirements_file
+from ue5_query.utils import gui_helpers
 
 class DeploymentWizard:
     def __init__(self, root):

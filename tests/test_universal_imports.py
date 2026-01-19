@@ -30,7 +30,7 @@ class TestUniversalImports(unittest.TestCase):
     def test_config_manager_import_dev(self):
         """Test config_manager imports in dev environment"""
         try:
-            from src.utils.config_manager import ConfigManager
+            from ue5_query.utils.config_manager import ConfigManager
             self.assertTrue(True, "Successfully imported ConfigManager with absolute path")
         except ImportError as e:
             self.fail(f"Failed to import ConfigManager in dev environment: {e}")
@@ -38,7 +38,7 @@ class TestUniversalImports(unittest.TestCase):
     def test_source_manager_import_dev(self):
         """Test source_manager imports in dev environment"""
         try:
-            from src.utils.source_manager import SourceManager
+            from ue5_query.utils.source_manager import SourceManager
             self.assertTrue(True, "Successfully imported SourceManager with absolute path")
         except ImportError as e:
             self.fail(f"Failed to import SourceManager in dev environment: {e}")
@@ -46,7 +46,7 @@ class TestUniversalImports(unittest.TestCase):
     def test_hybrid_query_import_dev(self):
         """Test hybrid_query imports in dev environment"""
         try:
-            from src.core.hybrid_query import HybridQueryEngine
+            from ue5_query.core.hybrid_query import HybridQueryEngine
             self.assertTrue(True, "Successfully imported HybridQueryEngine with absolute path")
         except ImportError as e:
             self.fail(f"Failed to import HybridQueryEngine in dev environment: {e}")
@@ -54,7 +54,7 @@ class TestUniversalImports(unittest.TestCase):
     def test_gui_dashboard_import_dev(self):
         """Test gui_dashboard imports in dev environment"""
         try:
-            from src.management.gui_dashboard import UnifiedDashboard
+            from ue5_query.management.gui_dashboard import UnifiedDashboard
             self.assertTrue(True, "Successfully imported UnifiedDashboard")
         except ImportError as e:
             self.fail(f"Failed to import UnifiedDashboard in dev environment: {e}")
@@ -63,11 +63,11 @@ class TestUniversalImports(unittest.TestCase):
         """Test build_embeddings can import semantic_chunker"""
         # Simulate the conditional import in build_embeddings.py
         try:
-            from src.utils.semantic_chunker import SemanticChunker
+            from ue5_query.utils.semantic_chunker import SemanticChunker
             self.assertTrue(True, "Successfully imported SemanticChunker")
         except ImportError:
             try:
-                from utils.semantic_chunker import SemanticChunker
+                from ue5_query.utils.semantic_chunker import SemanticChunker
                 self.assertTrue(True, "Successfully imported SemanticChunker with fallback")
             except ImportError as e:
                 self.fail(f"Failed to import SemanticChunker in dev environment: {e}")
@@ -110,7 +110,7 @@ TOOL_ROOT = Path(r'{self.dist_scripts}')
 sys.path.insert(0, str(TOOL_ROOT / 'src'))
 
 try:
-    from core.hybrid_query import HybridQueryEngine
+    from ue5_query.core.hybrid_query import HybridQueryEngine
     print("SUCCESS: HybridQueryEngine imported")
 except ImportError as e:
     print(f"FAIL: {{e}}")
@@ -133,7 +133,7 @@ TOOL_ROOT = Path(r'{self.dist_scripts}')
 sys.path.insert(0, str(TOOL_ROOT / 'src'))
 
 try:
-    from utils.config_manager import ConfigManager
+    from ue5_query.utils.config_manager import ConfigManager
     print("SUCCESS: ConfigManager imported")
 except ImportError as e:
     print(f"FAIL: {{e}}")
@@ -156,7 +156,7 @@ TOOL_ROOT = Path(r'{self.dist_scripts}')
 sys.path.insert(0, str(TOOL_ROOT / 'src'))
 
 try:
-    from utils.source_manager import SourceManager
+    from ue5_query.utils.source_manager import SourceManager
     print("SUCCESS: SourceManager imported")
 except ImportError as e:
     print(f"FAIL: {{e}}")
@@ -179,7 +179,7 @@ TOOL_ROOT = Path(r'{self.dist_scripts}')
 sys.path.insert(0, str(TOOL_ROOT / 'src'))
 
 try:
-    from management.gui_dashboard import UnifiedDashboard
+    from ue5_query.management.gui_dashboard import UnifiedDashboard
     print("SUCCESS: UnifiedDashboard imported")
 except ImportError as e:
     print(f"FAIL: {{e}}")
@@ -203,7 +203,7 @@ class TestImportHelper(unittest.TestCase):
 
     def test_is_dev_environment(self):
         """Test environment detection"""
-        from src.utils.import_helper import is_dev_environment, get_import_context
+        from ue5_query.utils.import_helper import is_dev_environment, get_import_context
 
         # Should detect dev environment when run from project root
         is_dev = is_dev_environment()
@@ -215,7 +215,7 @@ class TestImportHelper(unittest.TestCase):
 
     def test_universal_import_module(self):
         """Test universal_import function"""
-        from src.utils.import_helper import universal_import
+        from ue5_query.utils.import_helper import universal_import
 
         # Test importing entire module
         config_manager = universal_import('utils.config_manager')
@@ -223,7 +223,7 @@ class TestImportHelper(unittest.TestCase):
 
     def test_universal_import_names(self):
         """Test universal_import with specific names"""
-        from src.utils.import_helper import universal_import
+        from ue5_query.utils.import_helper import universal_import
 
         # Test importing specific names
         imports = universal_import('utils.config_manager', ['ConfigManager'])
@@ -232,7 +232,7 @@ class TestImportHelper(unittest.TestCase):
 
     def test_try_import_single(self):
         """Test try_import with single name"""
-        from src.utils.import_helper import try_import
+        from ue5_query.utils.import_helper import try_import
 
         ConfigManager = try_import(
             'src.utils.config_manager',
@@ -243,7 +243,7 @@ class TestImportHelper(unittest.TestCase):
 
     def test_try_import_multiple(self):
         """Test try_import with multiple names"""
-        from src.utils.import_helper import try_import
+        from ue5_query.utils.import_helper import try_import
 
         # Import from query_intent (has multiple classes/enums)
         imports = try_import(
@@ -267,7 +267,7 @@ class TestIntegration(unittest.TestCase):
 
     def test_config_manager_instantiation(self):
         """Test ConfigManager can be instantiated and used"""
-        from src.utils.config_manager import ConfigManager
+        from ue5_query.utils.config_manager import ConfigManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = ConfigManager(Path(tmpdir))
@@ -278,7 +278,7 @@ class TestIntegration(unittest.TestCase):
 
     def test_source_manager_instantiation(self):
         """Test SourceManager can be instantiated and used"""
-        from src.utils.source_manager import SourceManager
+        from ue5_query.utils.source_manager import SourceManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             sm = SourceManager(Path(tmpdir))
@@ -290,7 +290,7 @@ class TestIntegration(unittest.TestCase):
     def test_hybrid_query_engine_instantiation(self):
         """Test HybridQueryEngine can be instantiated"""
         # This requires vector store, so just test import and class structure
-        from src.core.hybrid_query import HybridQueryEngine
+        from ue5_query.core.hybrid_query import HybridQueryEngine
 
         self.assertTrue(callable(HybridQueryEngine))
         self.assertTrue(hasattr(HybridQueryEngine, 'query'))

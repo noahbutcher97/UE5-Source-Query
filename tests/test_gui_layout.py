@@ -14,8 +14,8 @@ import tkinter as tk
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils.gui_layout import GUIPrefs, LayoutMetrics
-from src.utils.gui_theme import Theme
+from ue5_query.utils.gui_layout import GUIPrefs, LayoutMetrics
+from ue5_query.utils.gui_theme import Theme
 
 class TestGUIPrefs(unittest.TestCase):
     def setUp(self):

@@ -59,7 +59,7 @@ if errorlevel 1 (
 )
 
 REM Run the CLI client (Tries server first, then falls back to local)
-"%TOOL_ROOT%.venv\Scripts\python.exe" "%TOOL_ROOT%src\utils\cli_client.py" %*
+"%TOOL_ROOT%.venv\Scripts\python.exe" -m ue5_query.utils.cli_client %*
 
 REM Exit with script result
 exit /b %errorlevel%

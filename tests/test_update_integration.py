@@ -6,15 +6,17 @@ Tests for bidirectional update system.
 import sys
 from pathlib import Path
 
-# Add src to path
+# Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR / "tools"))
 
 def run_tests():
     """Run update integration tests"""
     print("Testing update integration...")
 
     try:
+        # Add project root to path so 'tools' can be imported
+        sys.path.insert(0, str(SCRIPT_DIR))
         from tools.update import UpdateManager, is_dev_repo, is_deployed_repo
 
         # Test environment detection

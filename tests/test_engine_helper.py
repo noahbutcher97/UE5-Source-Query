@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils.engine_helper import get_available_engines, resolve_uproject_source
+from ue5_query.utils.engine_helper import get_available_engines, resolve_uproject_source
 
 
 class TestGetAvailableEngines(unittest.TestCase):

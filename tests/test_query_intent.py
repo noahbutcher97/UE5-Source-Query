@@ -6,7 +6,7 @@ from pathlib import Path
 TOOL_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(TOOL_ROOT / "src"))
 
-from core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
+from ue5_query.core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
 
 class TestQueryIntentAnalyzer(unittest.TestCase):
     def setUp(self):

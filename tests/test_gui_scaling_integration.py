@@ -12,9 +12,9 @@ from unittest.mock import MagicMock, patch
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.management.gui_dashboard import UnifiedDashboard
-from src.utils.gui_layout import LayoutMetrics
-from src.utils.config_manager import ConfigManager
+from ue5_query.management.gui_dashboard import UnifiedDashboard
+from ue5_query.utils.gui_layout import LayoutMetrics
+from ue5_query.utils.config_manager import ConfigManager
 
 class TestDashboardScaling(unittest.TestCase):
     def setUp(self):

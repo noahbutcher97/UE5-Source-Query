@@ -16,12 +16,12 @@ sys.modules['tkinter.scrolledtext'] = MagicMock()
 sys.modules['tkinter.filedialog'] = MagicMock()
 
 # Import views after mocking
-from src.management.views.query_tab import QueryTab
-from src.management.views.config_tab import ConfigTab
-from src.management.views.status_tab import StatusTab
-from src.management.views.maintenance_tab import MaintenanceTab
-from src.management.views.source_tab import SourceManagerTab
-from src.management.views.diagnostics_tab import DiagnosticsTab
+from ue5_query.management.views.query_tab import QueryTab
+from ue5_query.management.views.config_tab import ConfigTab
+from ue5_query.management.views.status_tab import StatusTab
+from ue5_query.management.views.maintenance_tab import MaintenanceTab
+from ue5_query.management.views.source_tab import SourceManagerTab
+from ue5_query.management.views.diagnostics_tab import DiagnosticsTab
 
 class TestDashboardViews(unittest.TestCase):
     def setUp(self):

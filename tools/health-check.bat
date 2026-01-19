@@ -36,7 +36,8 @@ if not exist "%SCRIPT_DIR%..\.venv\Scripts\python.exe" (
 )
 
 REM Run the health check script
-"%SCRIPT_DIR%..\.venv\Scripts\python.exe" "%SCRIPT_DIR%..\src\utils\verify_installation.py" %*
+cd /d "%SCRIPT_DIR%.."
+".venv\Scripts\python.exe" -m ue5_query.utils.verify_installation %*
 
 REM Capture exit code
 set HEALTH_EXIT_CODE=%errorlevel%

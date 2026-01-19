@@ -45,7 +45,7 @@ def test_unified_dashboard():
     root.withdraw()
 
     try:
-        from src.management.gui_dashboard import UnifiedDashboard
+        from ue5_query.management.gui_dashboard import UnifiedDashboard
         dashboard = UnifiedDashboard(root)
         print("✓ PASS")
         root.destroy()
@@ -60,7 +60,7 @@ def test_theme_attributes():
     """Test all Theme attributes exist"""
     print("Testing Theme attributes... ", end="", flush=True)
 
-    from src.utils.gui_theme import Theme
+    from ue5_query.utils.gui_theme import Theme
 
     required_attrs = [
         'PRIMARY', 'SECONDARY', 'SUCCESS', 'WARNING', 'ERROR',

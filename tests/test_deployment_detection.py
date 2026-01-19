@@ -6,16 +6,15 @@ Tests for deployment detection and environment analysis.
 import sys
 from pathlib import Path
 
-# Add src to path
+# Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
 
 def run_tests():
     """Run deployment detection tests"""
     print("Testing deployment detection...")
 
     try:
-        from src.utils.deployment_detector import DeploymentDetector
+        from ue5_query.utils.deployment_detector import DeploymentDetector
 
         # Test detection
         detector = DeploymentDetector(SCRIPT_DIR)

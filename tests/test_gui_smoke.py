@@ -6,9 +6,8 @@ Basic tests to ensure GUI modules can be imported and initialized.
 import sys
 from pathlib import Path
 
-# Add src to path
+# Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
 
 def run_tests():
     """Run GUI smoke tests"""
@@ -16,8 +15,8 @@ def run_tests():
 
     try:
         # Test GUI module imports
-        from src.utils.gui_theme import Theme
-        from src.management.gui_dashboard import UnifiedDashboard
+        from ue5_query.utils.gui_theme import Theme
+        from ue5_query.management.gui_dashboard import UnifiedDashboard
 
         print("  [OK] GUI modules importable")
 

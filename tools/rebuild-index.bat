@@ -69,7 +69,7 @@ if not exist "%SCRIPT_DIR%..\.venv\Scripts\python.exe" (
 )
 
 REM Validate EngineDirs.txt exists and is not empty
-if not exist "%SCRIPT_DIR%..\src\indexing\EngineDirs.txt" (
+if not exist "%SCRIPT_DIR%..\ue5_query\indexing\EngineDirs.txt" (
     echo [ERROR] EngineDirs.txt not found!
     echo.
     echo This file contains the list of UE5 directories to index.
@@ -84,7 +84,7 @@ if not exist "%SCRIPT_DIR%..\src\indexing\EngineDirs.txt" (
 )
 
 REM Count lines to ensure it's not empty
-for /f %%i in ('find /c /v "" ^< "%SCRIPT_DIR%..\src\indexing\EngineDirs.txt"') do set LINE_COUNT=%%i
+for /f %%i in ('find /c /v "" ^< "%SCRIPT_DIR%..\ue5_query\indexing\EngineDirs.txt"') do set LINE_COUNT=%%i
 if %LINE_COUNT% LSS 5 (
     echo [ERROR] EngineDirs.txt appears empty or corrupted
     echo   Found only %LINE_COUNT% lines, expected at least 5.
@@ -100,7 +100,7 @@ echo EngineDirs.txt validated: %LINE_COUNT% directory entries
 echo.
 
 REM Parse arguments
-set "BUILD_ARGS=--dirs-file %SCRIPT_DIR%..\src\indexing\EngineDirs.txt"
+set "BUILD_ARGS=--dirs-file %SCRIPT_DIR%..\ue5_query\indexing\EngineDirs.txt"
 set "SHOW_PROGRESS=0"
 
 :parse_loop
@@ -181,7 +181,7 @@ if %SHOW_PROGRESS%==1 (
 
 REM Run the build script
 cd /d "%SCRIPT_DIR%.."
-".venv\Scripts\python.exe" src\indexing\build_embeddings.py %BUILD_ARGS% --project-dirs-file "src\indexing\ProjectDirs.txt" --output-dir "%VECTOR_DIR%"
+".venv\Scripts\python.exe" -m ue5_query.indexing.build_embeddings %BUILD_ARGS% --project-dirs-file "ue5_query\indexing\ProjectDirs.txt" --output-dir "%VECTOR_DIR%"
 
 if errorlevel 1 (
     echo.

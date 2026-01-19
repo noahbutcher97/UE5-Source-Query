@@ -1,0 +1,3 @@
+[console_scripts]
+ue5-dashboard = ue5_query.management.gui_dashboard:main
+ue5-query = ue5_query.core.hybrid_query:main

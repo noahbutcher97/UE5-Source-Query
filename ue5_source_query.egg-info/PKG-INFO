@@ -1,27 +1,24 @@
 Metadata-Version: 2.4
 Name: ue5-source-query
 Version: 2.1.0
-Summary: Intelligent hybrid search system for Unreal Engine 5 source code
-Author-email: Developer <dev@example.com>
-Classifier: Programming Language :: Python :: 3
-Classifier: License :: OSI Approved :: MIT License
-Classifier: Operating System :: Microsoft :: Windows
-Requires-Python: >=3.11
+Summary: Hybrid semantic and definition search for Unreal Engine 5 source code
+Author-email: User <user@example.com>
+License: MIT
+Keywords: unreal-engine,search,semantic-search,embeddings,tool
+Requires-Python: >=3.8
 Description-Content-Type: text/markdown
-Requires-Dist: sentence-transformers>=2.2.2
-Requires-Dist: anthropic>=0.18.1
-Requires-Dist: numpy>=1.24.3
-Requires-Dist: tk>=0.1.0
+Requires-Dist: sentence-transformers>=2.2.0
+Requires-Dist: anthropic>=0.7.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: scikit-learn>=1.0.0
 Requires-Dist: python-dotenv>=1.0.0
-Requires-Dist: tqdm>=4.66.1
-Requires-Dist: psutil>=5.9.0
-Requires-Dist: requests>=2.31.0
-Requires-Dist: packaging>=23.2
-Requires-Dist: pynvml>=11.5.0
+Requires-Dist: nvidia-ml-py>=12.535.0
+Requires-Dist: tqdm>=4.65.0
 Provides-Extra: dev
-Requires-Dist: pytest>=7.4.0; extra == "dev"
-Requires-Dist: black>=24.0.0; extra == "dev"
-Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
 
 # UE5 Engine Source Query System
 

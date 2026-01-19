@@ -7,9 +7,8 @@ import sys
 import subprocess
 from pathlib import Path
 
-# Add src to path
+# Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
 
 def run_all_tests():
     """Run all test suites"""
@@ -26,7 +25,7 @@ def run_all_tests():
     print("[1/6] Running system health check...")
     try:
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_DIR / "src" / "utils" / "verify_installation.py")],
+            [sys.executable, "-m", "ue5_query.utils.verify_installation"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -62,7 +61,7 @@ def run_all_tests():
     print("[2/6] Running vector store validation...")
     try:
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_DIR / "src" / "utils" / "verify_vector_store.py")],
+            [sys.executable, "-m", "ue5_query.utils.verify_vector_store"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -168,12 +167,12 @@ def run_all_tests():
 
         # Import core modules
         imports = [
-            ("Core Query Engine", "src.core.hybrid_query"),
-            ("Definition Extractor", "src.core.definition_extractor"),
-            ("Query Intent", "src.core.query_intent"),
-            ("Deployment Detector", "src.utils.deployment_detector"),
-            ("Source Manager", "src.utils.source_manager"),
-            ("Config Manager", "src.utils.config_manager"),
+            ("Core Query Engine", "ue5_query.core.hybrid_query"),
+            ("Definition Extractor", "ue5_query.core.definition_extractor"),
+            ("Query Intent", "ue5_query.core.query_intent"),
+            ("Deployment Detector", "ue5_query.utils.deployment_detector"),
+            ("Source Manager", "ue5_query.utils.source_manager"),
+            ("Config Manager", "ue5_query.utils.config_manager"),
         ]
 
         import_passed = 0

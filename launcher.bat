@@ -25,6 +25,6 @@ if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
 )
 
 echo Launching Dashboard...
-"%PYTHON_CMD%" "%SCRIPT_DIR%src\management\gui_dashboard.py"
+"%PYTHON_CMD%" -m ue5_query.management.gui_dashboard
 
 exit /b %errorlevel%
