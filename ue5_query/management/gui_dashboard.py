@@ -26,6 +26,8 @@ from ue5_query.utils import gui_helpers
 from ue5_query.utils.ue_path_utils import UEPathUtils
 # HybridQueryEngine imported lazily in SearchService
 from ue5_query.management.services import UpdateService, SearchService, MaintenanceService
+from ue5_query.ai.service import IntelligenceService
+from ue5_query.management.views.assistant_view import AssistantView
 
 class UnifiedDashboard:
     def __init__(self, root):
@@ -51,6 +53,7 @@ class UnifiedDashboard:
         self.update_service = UpdateService(self.root, self.script_dir)
         self.search_service = SearchService(self.script_dir, self.config_manager)
         self.maint_service = MaintenanceService(self.script_dir)
+        self.ai_service = IntelligenceService(self.config_manager)
 
         # Deployment detection
         self.deployment_detector = DeploymentDetector(self.script_dir)
@@ -165,12 +168,19 @@ class UnifiedDashboard:
         self.notebook.add(self.tab_query, text="Query")
         self.build_query_tab()
 
-        # 3. File Search Tab (NEW - "Super File Search")
+        # 3. AI Assistant Tab (NEW)
+        self.tab_assistant = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_assistant, text="AI Assistant")
+        self.assistant_view = AssistantView(self.notebook, self.ai_service)
+        # Reparent the view's frame to our tab
+        self.assistant_view.frame.pack(in_=self.tab_assistant, fill=tk.BOTH, expand=True)
+
+        # 4. File Search Tab (NEW - "Super File Search")
         self.tab_file_search = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_file_search, text="File Search")
         self.build_file_search_tab()
 
-        # 4. Configuration Tab
+        # 5. Configuration Tab
         self.tab_config = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_config, text="Configuration")
         self.build_config_tab()
