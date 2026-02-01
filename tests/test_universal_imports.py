@@ -16,7 +16,7 @@ import unittest
 
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
+SRC_DIR = PROJECT_ROOT / "ue5_query"
 
 
 class TestUniversalImports(unittest.TestCase):
@@ -81,7 +81,7 @@ class TestDistributedEnvironment(unittest.TestCase):
         """Create a temporary distribution structure"""
         cls.temp_dir = Path(tempfile.mkdtemp())
         cls.dist_scripts = cls.temp_dir / "Scripts"
-        cls.dist_src = cls.dist_scripts / "src"
+        cls.dist_src = cls.dist_scripts / "ue5_query"
 
         # Copy source files to simulate distribution
         shutil.copytree(SRC_DIR, cls.dist_src)
@@ -107,7 +107,7 @@ from pathlib import Path
 
 # Simulate distributed environment
 TOOL_ROOT = Path(r'{self.dist_scripts}')
-sys.path.insert(0, str(TOOL_ROOT / 'src'))
+sys.path.insert(0, str(TOOL_ROOT))
 
 try:
     from ue5_query.core.hybrid_query import HybridQueryEngine
@@ -130,7 +130,7 @@ import sys
 from pathlib import Path
 
 TOOL_ROOT = Path(r'{self.dist_scripts}')
-sys.path.insert(0, str(TOOL_ROOT / 'src'))
+sys.path.insert(0, str(TOOL_ROOT))
 
 try:
     from ue5_query.utils.config_manager import ConfigManager
@@ -153,7 +153,7 @@ import sys
 from pathlib import Path
 
 TOOL_ROOT = Path(r'{self.dist_scripts}')
-sys.path.insert(0, str(TOOL_ROOT / 'src'))
+sys.path.insert(0, str(TOOL_ROOT))
 
 try:
     from ue5_query.utils.source_manager import SourceManager
@@ -176,7 +176,7 @@ import sys
 from pathlib import Path
 
 TOOL_ROOT = Path(r'{self.dist_scripts}')
-sys.path.insert(0, str(TOOL_ROOT / 'src'))
+sys.path.insert(0, str(TOOL_ROOT))
 
 try:
     from ue5_query.management.gui_dashboard import UnifiedDashboard

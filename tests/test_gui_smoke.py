@@ -8,6 +8,7 @@ from pathlib import Path
 
 # Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(SCRIPT_DIR))
 
 def run_tests():
     """Run GUI smoke tests"""

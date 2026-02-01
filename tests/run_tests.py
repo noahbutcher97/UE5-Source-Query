@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Determine tool root
 SCRIPT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(SCRIPT_DIR))
 
 def run_all_tests():
     """Run all test suites"""
@@ -97,10 +98,17 @@ def run_all_tests():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             if hasattr(module, 'run_tests'):
-                module.run_tests()
-            print("[SUCCESS] Deployment detection tests passed\n")
-            total_passed += 1
-            test_suites.append(("Deployment Detection", "PASS"))
+                if module.run_tests():
+                    print("[SUCCESS] Deployment detection tests passed\n")
+                    total_passed += 1
+                    test_suites.append(("Deployment Detection", "PASS"))
+                else:
+                    print("[FAILED] Deployment detection tests failed\n")
+                    total_failed += 1
+                    test_suites.append(("Deployment Detection", "FAIL"))
+            else:
+                print("[SKIP] Deployment detection test module has no run_tests function\n")
+                test_suites.append(("Deployment Detection", "SKIP"))
         else:
             print("[SKIP] Deployment detection test file not found\n")
             test_suites.append(("Deployment Detection", "SKIP"))
@@ -119,10 +127,17 @@ def run_all_tests():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             if hasattr(module, 'run_tests'):
-                module.run_tests()
-            print("[SUCCESS] Update integration tests passed\n")
-            total_passed += 1
-            test_suites.append(("Update Integration", "PASS"))
+                if module.run_tests():
+                    print("[SUCCESS] Update integration tests passed\n")
+                    total_passed += 1
+                    test_suites.append(("Update Integration", "PASS"))
+                else:
+                    print("[FAILED] Update integration tests failed\n")
+                    total_failed += 1
+                    test_suites.append(("Update Integration", "FAIL"))
+            else:
+                print("[SKIP] Update integration test module has no run_tests function\n")
+                test_suites.append(("Update Integration", "SKIP"))
         else:
             print("[SKIP] Update integration test file not found\n")
             test_suites.append(("Update Integration", "SKIP"))

@@ -12,6 +12,15 @@ from ue5_query.core.filtered_search import FilteredSearch
 from ue5_query.core import query_engine
 from ue5_query.utils.config_manager import ConfigManager
 from ue5_query.utils.logger import get_project_logger
+from ue5_query.core.query_expansion import QueryExpander
+from ue5_query.utils.semantic_chunker import SemanticChunker
+from ue5_query.utils.ue_path_utils import UEPathUtils
+
+# Try importing reranker (optional dependency)
+try:
+    from ue5_query.core.reranker import SearchReranker
+except ImportError:
+    SearchReranker = None
 
 logger = get_project_logger(__name__)
 
@@ -44,6 +53,48 @@ class HybridQueryEngine:
 
         # Initialize FilteredSearch once
         self.filtered_search = FilteredSearch(self.embeddings, self.meta)
+        
+        # Initialize Reranker (lazy load)
+        self.reranker = SearchReranker() if SearchReranker else None
+
+        # Chunking config (must match build_embeddings.py defaults)
+        self.use_semantic_chunking = self.config_manager.get("SEMANTIC_CHUNKING", "1") == "1"
+        self.chunk_size = int(self.config_manager.get("CHUNK_SIZE", "2000" if self.use_semantic_chunking else "1500"))
+        self.chunk_overlap = int(self.config_manager.get("CHUNK_OVERLAP", "200"))
+        
+        self.chunker = None
+        if self.use_semantic_chunking:
+            try:
+                self.chunker = SemanticChunker(max_chunk_size=self.chunk_size, overlap=self.chunk_overlap)
+            except ImportError:
+                pass
+
+    def _get_chunk_text(self, file_path: str, chunk_index: int) -> str:
+        """Retrieve the text for a specific chunk by re-reading and re-chunking."""
+        try:
+            path = Path(file_path)
+            if not path.exists():
+                return ""
+            
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            
+            if self.chunker:
+                chunks = self.chunker.chunk(text, str(path))
+            else:
+                # Fallback char chunking (must match build_embeddings.py logic)
+                chunks = []
+                step = self.chunk_size - self.chunk_overlap
+                for start in range(0, len(text), step):
+                    chunk = text[start:start + self.chunk_size]
+                    if len(chunk) < 300 and start != 0: break
+                    chunks.append(chunk)
+            
+            if 0 <= chunk_index < len(chunks):
+                return chunks[chunk_index]
+        except Exception as e:
+            logger.warning(f"Failed to fetch chunk {chunk_index} from {file_path}: {e}")
+        
+        return ""
 
     def query(
         self,
@@ -53,6 +104,7 @@ class HybridQueryEngine:
         show_reasoning: bool = False,
         scope: str = "engine",
         embed_model_name: Optional[str] = None, # Allow overriding global model for a specific query
+        use_reranker: bool = False, # New: enable reranking
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -66,6 +118,7 @@ class HybridQueryEngine:
             json_out: Output as JSON (handled by main or caller)
             scope: Search scope ('engine', 'project', 'all')
             embed_model_name: Override embedding model name for this query
+            use_reranker: Enable cross-encoder re-ranking (slower but more precise)
             **kwargs: Additional args passed to semantic search
 
         Returns:
@@ -79,6 +132,13 @@ class HybridQueryEngine:
         intent = self.analyzer.analyze(question)
         timing['intent_analysis_s'] = time.perf_counter() - t0
 
+        # Query Expansion (NEW)
+        t_exp = time.perf_counter()
+        expanded_terms = QueryExpander.expand(question)
+        # Use expanded terms for semantic search (joined) and definitions (iteration)
+        expanded_query_str = " ".join(expanded_terms) if len(expanded_terms) > 1 else intent.enhanced_query
+        timing['expansion_s'] = time.perf_counter() - t_exp
+
         if show_reasoning:
             logger.info("=== Query Analysis ===")
             logger.info(f"Type: {intent.query_type.value}")
@@ -87,7 +147,9 @@ class HybridQueryEngine:
             logger.info(f"Confidence: {intent.confidence:.2f}")
             logger.info(f"Reasoning: {intent.reasoning}")
             logger.info(f"Scope: {scope}")
-            if intent.enhanced_query != question:
+            if expanded_terms and len(expanded_terms) > 1:
+                logger.info(f"Expanded: {expanded_terms}")
+            elif intent.enhanced_query != question:
                 logger.info(f"Enhanced query: {intent.enhanced_query}")
             print() # Keep one newline for visual separation in console if needed, or remove
 
@@ -100,7 +162,8 @@ class HybridQueryEngine:
                 'confidence': intent.confidence,
                 'reasoning': intent.reasoning,
                 'enhanced_query': intent.enhanced_query,
-                'scope': scope
+                'scope': scope,
+                'expanded_terms': expanded_terms
             },
             'definition_results': [],
             'semantic_results': [],
@@ -109,27 +172,78 @@ class HybridQueryEngine:
         }
 
         # Route based on intent
+        # Check if expansion reveals new entities (upgrading Semantic -> Hybrid)
+        expanded_has_entities = False
+        if expanded_terms and intent.query_type == QueryType.SEMANTIC:
+             for term in expanded_terms:
+                 # Check for UE5 prefixes (F, U, A, I, E) followed by uppercase
+                 if len(term) > 2 and term[0] in 'FUAIE' and term[1].isupper():
+                     expanded_has_entities = True
+                     if show_reasoning:
+                        logger.info(f"Expansion found entity '{term}', upgrading to HYBRID search")
+                     break
+
+        is_file_query = "File/Location" in intent.reasoning
+
         if intent.query_type == QueryType.DEFINITION:
             t1 = time.perf_counter()
-            def_results = self._extract_definitions(intent, scope)
+            def_results = self._extract_definitions(intent, scope, expanded_terms)
             timing['definition_extraction_s'] = time.perf_counter() - t1
 
             results['definition_results'] = [self._format_def_result(r) for r in def_results]
-            results['combined_results'] = results['definition_results']
+            
+            # SEMANTIC FALLBACK:
+            # If no definitions found, or if we want to be robust, run a quick semantic search 
+            # to see if we missed the "concept".
+            # Especially useful if the regex failed but the concept exists (e.g. "physical constraints").
+            if not def_results or len(def_results) < 3:
+                 t2 = time.perf_counter()
+                 sem_query = expanded_query_str if expanded_query_str else intent.enhanced_query
+                 sem_results = self._semantic_search(
+                    sem_query,
+                    top_k=top_k,
+                    timing=timing,
+                    intent=intent,
+                    scope=scope,
+                    embed_model_name=embed_model_name,
+                    use_reranker=use_reranker,
+                    original_query=question,
+                    deduplicate_files=is_file_query,
+                    **kwargs
+                 )
+                 results['semantic_results'] = sem_results
+                 
+                 # Merge: Add semantic results if they look like the target entity name
+                 # Or just append them as "related matches"
+                 combined = results['definition_results'][:]
+                 def_files = {r['file_path'] for r in combined}
+                 
+                 for s in sem_results:
+                     if s['path'] not in def_files:
+                         combined.append(s)
+                 
+                 results['combined_results'] = combined[:top_k]
+            else:
+                 results['combined_results'] = results['definition_results']
 
-        elif intent.query_type == QueryType.HYBRID:
+        elif intent.query_type == QueryType.HYBRID or expanded_has_entities:
             t1 = time.perf_counter()
-            def_results = self._extract_definitions(intent, scope)
+            def_results = self._extract_definitions(intent, scope, expanded_terms)
             timing['definition_extraction_s'] = time.perf_counter() - t1
 
             t2 = time.perf_counter()
+            # Use expanded query for semantic search
+            sem_query = expanded_query_str if expanded_query_str else intent.enhanced_query
             sem_results = self._semantic_search(
-                intent.enhanced_query,
+                sem_query,
                 top_k=top_k,
                 timing=timing,
                 intent=intent,
                 scope=scope,
                 embed_model_name=embed_model_name,
+                use_reranker=use_reranker,
+                original_query=question, # Pass original query for re-ranking
+                deduplicate_files=is_file_query,
                 **kwargs
             )
             timing['semantic_search_s'] = time.perf_counter() - t2
@@ -154,13 +268,18 @@ class HybridQueryEngine:
 
         else:  # SEMANTIC
             t1 = time.perf_counter()
+            # Use expanded query for semantic search
+            sem_query = expanded_query_str if expanded_query_str else intent.enhanced_query
             sem_results = self._semantic_search(
-                intent.enhanced_query,
+                sem_query,
                 top_k=top_k,
                 timing=timing,
                 intent=intent,
                 scope=scope,
                 embed_model_name=embed_model_name,
+                use_reranker=use_reranker,
+                original_query=question, # Pass original query for re-ranking
+                deduplicate_files=is_file_query,
                 **kwargs
             )
             timing['semantic_search_s'] = time.perf_counter() - t1
@@ -173,9 +292,30 @@ class HybridQueryEngine:
 
         return results
 
-    def _extract_definitions(self, intent, scope: str = "engine") -> List[DefinitionResult]:
-        """Extract definitions based on intent"""
-        if not intent.entity_name or not intent.entity_type:
+    def _extract_definitions(self, intent, scope: str = "engine", expanded_terms: List[str] = None) -> List[DefinitionResult]:
+        """Extract definitions based on intent, with optional expansion"""
+        entities_to_search = []
+        
+        # Add primary entity from intent
+        if intent.entity_name:
+            entities_to_search.append((intent.entity_name, intent.entity_type))
+        
+        # Add expanded entities with type inference
+        if expanded_terms:
+            for term in expanded_terms:
+                # Skip if already added
+                if any(e[0] == term for e in entities_to_search):
+                    continue
+                    
+                # Infer type for expanded term
+                # Accessing public method infer_entity_type from analyzer
+                inferred_type = self.analyzer.infer_entity_type(term)
+                
+                # Only add if we successfully inferred a type (e.g. FVector -> STRUCT)
+                if inferred_type != EntityType.UNKNOWN:
+                    entities_to_search.append((term, inferred_type))
+
+        if not entities_to_search:
             return []
 
         # Filter files by scope for definition extraction
@@ -183,22 +323,34 @@ class HybridQueryEngine:
         definition_file_paths = list(set(Path(item['path']) for item in scoped_meta))
         
         # Reinitialize DefinitionExtractor for each query to ensure fresh file list for current scope
-        # This is needed because the self.definition_extractor was initialized with ALL files
         scoped_extractor = DefinitionExtractor(definition_file_paths)
 
-        # Route to appropriate extractor with fuzzy matching enabled
-        if intent.entity_type == EntityType.STRUCT:
-            return scoped_extractor.extract_struct(intent.entity_name, fuzzy=True)
-        elif intent.entity_type == EntityType.CLASS:
-            return scoped_extractor.extract_class(intent.entity_name, fuzzy=True)
-        elif intent.entity_type == EntityType.ENUM:
-            return scoped_extractor.extract_enum(intent.entity_name, fuzzy=True)
-        elif intent.entity_type == EntityType.FUNCTION:
-            return scoped_extractor.extract_function(intent.entity_name, fuzzy=True)
+        all_results = []
+        
+        # Search for each entity term
+        for entity_name, entity_type in entities_to_search:
+            # Route to appropriate extractor with fuzzy matching enabled
+            if entity_type == EntityType.STRUCT:
+                all_results.extend(scoped_extractor.extract_struct(entity_name, fuzzy=True))
+            elif entity_type == EntityType.CLASS:
+                all_results.extend(scoped_extractor.extract_class(entity_name, fuzzy=True))
+            elif entity_type == EntityType.ENUM:
+                all_results.extend(scoped_extractor.extract_enum(entity_name, fuzzy=True))
+            elif entity_type == EntityType.FUNCTION:
+                all_results.extend(scoped_extractor.extract_function(entity_name, fuzzy=True))
 
-        return []
+        # Deduplicate and sort by quality
+        seen = set()
+        unique_results = []
+        for r in sorted(all_results, key=lambda x: -x.match_quality):
+            key = f"{r.file_path}:{r.line_start}"
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(r)
 
-    def _semantic_search(self, query: str, top_k: int, timing: dict, intent=None, scope: str = "engine", embed_model_name: str = None, **kwargs) -> List[Dict[str, Any]]:
+        return unique_results
+
+    def _semantic_search(self, query: str, top_k: int, timing: dict, intent=None, scope: str = "engine", embed_model_name: str = None, use_reranker: bool = False, original_query: str = None, deduplicate_files: bool = False, **kwargs) -> List[Dict[str, Any]]:
         """
         Perform semantic search with optional filtered search and entity boosting.
         """
@@ -234,46 +386,68 @@ class HybridQueryEngine:
         if scope == 'engine': origin_filter = 'engine'
         elif scope == 'project': origin_filter = 'project'
 
-        # should_use_filtered is always True now because self.meta is always enriched.
-        # This simplifies the logic and always uses FilteredSearch.
-        should_use_filtered = True 
+        # Extract entity names for boosting
+        boost_entities = [intent.entity_name] if intent and intent.entity_name else []
 
-        if should_use_filtered:
-            # Use FilteredSearch with entity boosting
-            # Reuse the pre-initialized filtered_search
-            search = self.filtered_search 
+        # Use FilteredSearch with entity boosting
+        # Reuse the pre-initialized filtered_search
+        search = self.filtered_search 
 
-            # Extract entity names for boosting
-            boost_entities = [intent.entity_name] if intent and intent.entity_name else []
+        # Retrieve more candidates if re-ranking or deduplicating
+        search_k = top_k * 10 if (use_reranker or deduplicate_files) else top_k
 
-            results = search.search(
-                qvec,
-                top_k=top_k,
-                boost_entities=boost_entities,
-                boost_macros=True,  # Boost UE5 macro chunks
-                query_type=intent.query_type.value if intent else None,
-                origin=origin_filter  # Pass scope filter
-            )
+        results = search.search(
+            qvec,
+            top_k=search_k,
+            boost_entities=boost_entities,
+            boost_macros=True,  # Boost UE5 macro chunks
+            query_type=intent.query_type.value if intent else None,
+            origin=origin_filter,  # Pass scope filter
+            query_text=query # Pass raw query for sparse scoring
+        )
 
-            # Convert FilteredSearch results to query_engine format
-            hits = []
-            for r in results:
-                hits.append({
-                    'path': r['path'],
-                    'chunk_index': r['chunk_index'],
-                    'total_chunks': r['total_chunks'],
-                    'score': r['score'],
-                    'boosted': True,
-                    'origin': r.get('origin', 'engine') # Ensure origin is passed
-                })
-        else:
-            # This path should ideally not be taken anymore as self.meta is always enriched
-            # It's kept as a theoretical fallback, but FilteredSearch is always preferred.
-            hits = query_engine.select(qvec, self.embeddings, self.meta, top_k)
-            for hit in hits:
-                hit['boosted'] = False
+        # Convert FilteredSearch results to query_engine format
+        hits = []
+        seen_files = set()
+        
+        for r in results:
+            path = r['path']
+            if deduplicate_files:
+                if path in seen_files:
+                    continue
+                seen_files.add(path)
+
+            hits.append({
+                'path': r['path'],
+                'chunk_index': r['chunk_index'],
+                'total_chunks': r['total_chunks'],
+                'score': r['score'],
+                'boosted': True,
+                'origin': r.get('origin', 'engine'), # Ensure origin is passed
+                'entities': r.get('entities', []),
+                # If available, carry over text snippet for re-ranking
+                # Currently we rely on metadata + reading file on demand
+            })
+            
+            if len(hits) >= search_k:
+                break
 
         timing['select_s'] = time.perf_counter() - t1
+
+        # Re-Ranking (Precision Phase)
+        if use_reranker and self.reranker:
+            t_rerank = time.perf_counter()
+            # Hydrate hits with text
+            for hit in hits:
+                if 'text_snippet' not in hit:
+                    hit['text_snippet'] = self._get_chunk_text(hit['path'], hit['chunk_index'])
+            
+            # Perform re-ranking
+            ranked_hits = self.reranker.rerank(original_query or query, hits, top_k=top_k)
+            timing['rerank_s'] = time.perf_counter() - t_rerank
+            hits = ranked_hits
+        else:
+            hits = hits[:top_k]
 
         return hits
 
@@ -344,6 +518,9 @@ class HybridQueryEngine:
 
     def _format_def_result(self, result: DefinitionResult) -> Dict[str, Any]:
         """Format definition result for output"""
+        # Calculate module and include path
+        path_info = UEPathUtils.guess_module_and_include(result.file_path)
+        
         return {
             'type': 'definition',
             'file_path': result.file_path,
@@ -351,11 +528,13 @@ class HybridQueryEngine:
             'line_end': result.line_end,
             'entity_type': result.entity_type,
             'entity_name': result.entity_name,
-            'definition': result.definition[:500],  # Truncate for display
+            'definition': result.definition[:32000],  # Increased limit for full retrieval
             'members': result.members[:10],  # First 10 members
             'total_members': len(result.members),
             'match_quality': result.match_quality,
-            'origin': result.origin if hasattr(result, 'origin') else 'engine' # Add origin
+            'origin': result.origin if hasattr(result, 'origin') else 'engine', # Add origin
+            'module': path_info['module'],
+            'include': path_info['include']
         }
 
 def print_results(results: Dict[str, Any], show_reasoning: bool = False):
@@ -408,6 +587,7 @@ def main():
     parser.add_argument("--extensions", default="", help="Filter by extensions (e.g., .cpp,.h)")
     parser.add_argument("--scope", choices=["engine", "project", "all"], default="engine", help="Search scope (default: engine)")
     parser.add_argument("--model", default=None, help="Override embedding model name")
+    parser.add_argument("--use-reranker", action="store_true", help="Enable re-ranking (slower, higher precision)")
 
     args = parser.parse_args()
     question = " ".join(args.question)
@@ -423,6 +603,7 @@ def main():
         show_reasoning=args.show_reasoning,
         scope=args.scope,
         embed_model_name=args.model,
+        use_reranker=args.use_reranker,
         # Pass other args if needed by semantic search, etc.
         pattern=args.pattern,
         extensions=args.extensions

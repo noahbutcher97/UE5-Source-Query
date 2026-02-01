@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from dataclasses import dataclass, field
 
+from ue5_query.core.fuzzy_matcher import FuzzyMatcher
+
 @dataclass
 class DefinitionResult:
     """Result of a definition extraction"""
@@ -82,6 +84,20 @@ class DefinitionExtractor:
     def __init__(self, files: List[Path]):
         """Initialize with list of files to search"""
         self.files = files
+        self._content_cache = {}
+
+    def _read_file(self, file_path: Path) -> Optional[str]:
+        """Read file with caching"""
+        if file_path in self._content_cache:
+            return self._content_cache[file_path]
+        
+        try:
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+            self._content_cache[file_path] = content
+            return content
+        except (OSError, UnicodeDecodeError):
+            self._content_cache[file_path] = None
+            return None
 
     def extract_struct(self, name: str, fuzzy: bool = False) -> List[DefinitionResult]:
         """Extract struct definition(s) matching name"""
@@ -123,7 +139,10 @@ class DefinitionExtractor:
 
         for file_path in self.files:
             try:
-                content = file_path.read_text(encoding='utf-8', errors='ignore')
+                content = self._read_file(file_path)
+                if content is None:
+                    continue
+                    
                 lines = content.splitlines()
 
                 # Search for pattern matches
@@ -195,10 +214,6 @@ class DefinitionExtractor:
         if query == candidate or query_lower == candidate_lower:
             return 1.0
 
-        # Case-insensitive match
-        if query_lower == candidate_lower:
-            return 0.95
-
         # UE5 prefix handling - strip common prefixes and compare
         query_stripped = self._strip_ue_prefix(query)
         candidate_stripped = self._strip_ue_prefix(candidate)
@@ -209,47 +224,20 @@ class DefinitionExtractor:
         if query_stripped_lower == candidate_stripped_lower:
             return 0.90  # High quality match
 
-        # Query missing prefix but candidate has it (e.g., "hitresult" vs "FHitResult")
-        if query_lower == candidate_stripped_lower:
-            return 0.88
-
-        # Candidate missing prefix but query has it (rare but possible)
-        if query_stripped_lower == candidate_lower:
-            return 0.85
-
         if not fuzzy:
             return 0.0  # Strict mode: no further fuzzy matching
 
-        # Substring match (with prefix stripped)
-        if query_stripped_lower in candidate_stripped_lower:
-            ratio = len(query_stripped_lower) / len(candidate_stripped_lower)
-            return 0.75 * ratio
-
-        # Original substring match (fallback)
-        if query_lower in candidate_lower:
-            ratio = len(query_lower) / len(candidate_lower)
-            return 0.70 * ratio
-
-        # Prefix match (with UE prefix stripped)
-        if candidate_stripped_lower.startswith(query_stripped_lower):
-            ratio = len(query_stripped_lower) / len(candidate_stripped_lower)
-            return 0.80 * ratio
-
-        # Levenshtein distance on stripped names
-        distance = self._levenshtein(query_stripped_lower, candidate_stripped_lower)
-        max_len = max(len(query_stripped_lower), len(candidate_stripped_lower))
-
-        if distance <= 2 and max_len > 3:  # Allow up to 2 typos
-            similarity = 1.0 - (distance / max_len)
-            return 0.65 * similarity
-
-        # Levenshtein on original (fallback)
-        distance_orig = self._levenshtein(query_lower, candidate_lower)
-        max_len_orig = max(len(query_lower), len(candidate_lower))
-
-        if distance_orig <= 2 and max_len_orig > 3:
-            similarity = 1.0 - (distance_orig / max_len_orig)
-            return 0.60 * similarity
+        # Use Advanced Fuzzy Matcher
+        # Try both original and stripped versions
+        score_orig = FuzzyMatcher.calculate_compound_score(query, candidate)
+        score_stripped = FuzzyMatcher.calculate_compound_score(query_stripped, candidate_stripped)
+        
+        # Take best score
+        score = max(score_orig, score_stripped)
+        
+        # Threshold for fuzzy match
+        if score > 0.4: # Lower threshold to 0.4 to catch "FVec" -> "FVector"
+            return score
 
         return 0.0
 
@@ -271,27 +259,6 @@ class DefinitionExtractor:
             return name[1:]
 
         return name
-
-    def _levenshtein(self, s1: str, s2: str) -> int:
-        """Calculate Levenshtein distance between two strings"""
-        if len(s1) < len(s2):
-            return self._levenshtein(s2, s1)
-
-        if len(s2) == 0:
-            return len(s1)
-
-        previous_row = range(len(s2) + 1)
-        for i, c1 in enumerate(s1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(s2):
-                # j+1 instead of j since previous_row and current_row are one character longer
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-
-        return previous_row[-1]
 
     def _extract_definition_block(
         self,
@@ -497,8 +464,8 @@ def main():
         print(f"File: {result.file_path}")
         print(f"Lines: {result.line_start}-{result.line_end}")
         print(f"\nDefinition:")
-        print(result.definition[:500])  # First 500 chars
-        if len(result.definition) > 500:
+        print(result.definition[:32000])  # Increased display limit
+        if len(result.definition) > 32000:
             print("...")
         print(f"\nMembers ({len(result.members)}):")
         for member in result.members[:10]:  # First 10 members

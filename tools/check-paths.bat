@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 print('=== Engine Directories (EngineDirs.txt) ===')
-engine_file = Path('src/indexing/EngineDirs.txt')
+engine_file = Path('ue5_query/indexing/EngineDirs.txt')
 if engine_file.exists():
     with open(engine_file) as f:
         lines = [l.strip() for l in f if l.strip() and not l.startswith('#')]
@@ -54,7 +54,7 @@ else:
     print('Run setup.bat to configure engine paths.')
 
 print('\n=== Project Directories (ProjectDirs.txt) ===')
-project_file = Path('src/indexing/ProjectDirs.txt')
+project_file = Path('ue5_query/indexing/ProjectDirs.txt')
 if project_file.exists():
     with open(project_file) as f:
         lines = [l.strip() for l in f if l.strip() and not l.startswith('#')]
@@ -78,7 +78,6 @@ if project_file.exists():
             print('\n[ERROR] Some project paths do not exist!')
 else:
     print('[INFO] ProjectDirs.txt not found (optional)')
-
 print('\n=== Configuration (.env) ===')
 env_file = Path('config/.env')
 if env_file.exists():

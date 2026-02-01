@@ -40,12 +40,12 @@ def main():
 
     # Output format options (NEW)
     parser.add_argument("--format", default="text",
-                       choices=["text", "json", "jsonl", "xml", "markdown", "code"],
-                       help="Output format: text (default), json, jsonl, xml, markdown, code")
+                       choices=["text", "json", "jsonl", "xml", "markdown", "code", "path"],
+                       help="Output format: text (default), json, jsonl, xml, markdown, code, path")
     parser.add_argument("--no-code", action="store_true",
                        help="Exclude code from output (metadata only)")
-    parser.add_argument("--max-lines", type=int, default=50,
-                       help="Maximum lines per code snippet (default: 50)")
+    parser.add_argument("--max-lines", type=int, default=1000,
+                       help="Maximum lines per code snippet (default: 1000)")
 
     # Filter options (NEW - Phase 2)
     parser.add_argument("--filter", type=str, default=None,
@@ -138,7 +138,7 @@ def main():
 
     # 2. Fallback to Local
     if not results:
-        if not args.no_server and not args.json:
+        if not args.no_server and not args.json and args.format == "text":
             print("[INFO] Server unavailable. Starting local engine (Cold Start)...")
 
         # Initialize engine locally
@@ -171,7 +171,7 @@ def main():
                 question=question,
                 top_k=args.top_k,
                 scope=args.scope,
-                show_reasoning=not args.json,
+                show_reasoning=(args.format == "text" and not args.json),
                 **filter_kwargs  # Pass parsed filters to engine
             )
         except Exception as e:

@@ -97,6 +97,8 @@ def verify_required_packages() -> HealthCheckResult:
         ("sentence_transformers", "sentence-transformers"),
         ("anthropic", "anthropic"),
         ("numpy", "numpy"),
+        ("sklearn", "scikit-learn"),
+        ("pynvml", "nvidia-ml-py"),
     ]
 
     missing = []

@@ -20,6 +20,7 @@ class OutputFormat(Enum):
     XML = "xml"             # XML format
     MARKDOWN = "markdown"   # Enhanced markdown
     CODE = "code"           # Just code snippets
+    PATH = "path"           # Just file paths
 
 
 class OutputFormatter:
@@ -30,14 +31,14 @@ class OutputFormatter:
         results: Dict[str, Any],
         format_type: OutputFormat = OutputFormat.TEXT,
         include_code: bool = True,
-        max_snippet_lines: int = 50
+        max_snippet_lines: int = 1000
     ) -> str:
         """
         Format query results according to specified format.
 
         Args:
             results: HybridQueryEngine.query() result dictionary
-            format_type: Output format (TEXT, JSON, JSONL, XML, MARKDOWN, CODE)
+            format_type: Output format (TEXT, JSON, JSONL, XML, MARKDOWN, CODE, PATH)
             include_code: Include code snippets (default: True)
             max_snippet_lines: Max lines per code snippet (default: 50)
 
@@ -54,6 +55,8 @@ class OutputFormatter:
             return OutputFormatter._to_markdown(results, include_code, max_snippet_lines)
         elif format_type == OutputFormat.CODE:
             return OutputFormatter._to_code_only(results, max_snippet_lines)
+        elif format_type == OutputFormat.PATH:
+            return OutputFormatter._to_path(results)
         else:
             # TEXT format - use existing print_results logic
             return OutputFormatter._to_text(results)
@@ -417,6 +420,26 @@ class OutputFormatter:
             snippets.append(snippet)
 
         return "\n".join(snippets) if snippets else "// No code snippets available"
+
+    @staticmethod
+    def _to_path(results: Dict[str, Any]) -> str:
+        """Extract just file paths (useful for file opening integrations)"""
+        paths = []
+
+        # Prioritize definition results
+        for def_result in results.get("definition_results", []):
+            file_path = def_result.get("file_path", "")
+            if file_path and file_path not in paths:
+                paths.append(file_path)
+
+        # Fallback to semantic results if no definitions found
+        if not paths:
+            for sem_result in results.get("semantic_results", []):
+                file_path = sem_result.get("path", "")
+                if file_path and file_path not in paths:
+                    paths.append(file_path)
+
+        return "\n".join(paths) if paths else "No files found"
 
     @staticmethod
     def _to_text(results: Dict[str, Any]) -> str:

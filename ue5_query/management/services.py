@@ -152,6 +152,9 @@ class SearchService:
                 if filter_vars.get('boost_macros'):
                     filter_kwargs['boost_macros'] = True
 
+                # Extract re-ranker option
+                use_reranker = filter_vars.get('use_reranker', False)
+
                 # Run query
                 results = self.engine.query(
                     question=query,
@@ -159,6 +162,7 @@ class SearchService:
                     scope=scope,
                     embed_model_name=embed_model,
                     show_reasoning=False,
+                    use_reranker=use_reranker,
                     **filter_kwargs
                 )
                 

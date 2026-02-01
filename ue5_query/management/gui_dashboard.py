@@ -23,7 +23,8 @@ from ue5_query.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary, get_g
 from ue5_query.utils.cuda_installer import install_cuda_with_progress
 from ue5_query.utils.deployment_detector import DeploymentDetector, DeploymentRegistry
 from ue5_query.utils import gui_helpers
-from ue5_query.core.hybrid_query import HybridQueryEngine
+from ue5_query.utils.ue_path_utils import UEPathUtils
+# HybridQueryEngine imported lazily in SearchService
 from ue5_query.management.services import UpdateService, SearchService, MaintenanceService
 
 class UnifiedDashboard:
@@ -63,6 +64,7 @@ class UnifiedDashboard:
         self.embed_batch_size_var = tk.StringVar(value=self.config_manager.get('EMBED_BATCH_SIZE', '16'))
         self.text_scale_var = tk.DoubleVar(value=float(self.config_manager.get('GUI_TEXT_SCALE', LayoutMetrics().text_scale)))
         self.query_scope_var = tk.StringVar(value="engine")
+        self.use_reranker_var = tk.BooleanVar(value=False)
 
         # Filter variables
         self.filter_entity_type_var = tk.StringVar(value="")
@@ -163,7 +165,12 @@ class UnifiedDashboard:
         self.notebook.add(self.tab_query, text="Query")
         self.build_query_tab()
 
-        # 3. Configuration Tab
+        # 3. File Search Tab (NEW - "Super File Search")
+        self.tab_file_search = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_file_search, text="File Search")
+        self.build_file_search_tab()
+
+        # 4. Configuration Tab
         self.tab_config = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_config, text="Configuration")
         self.build_config_tab()
@@ -984,6 +991,9 @@ class UnifiedDashboard:
         for label, val in scopes:
             ttk.Radiobutton(options_frame, text=label, variable=self.query_scope_var, value=val).pack(side=tk.LEFT, padx=10)
 
+        # Re-ranking toggle
+        ttk.Checkbutton(options_frame, text="Enable Re-ranking (High Precision)", variable=self.use_reranker_var).pack(side=tk.LEFT, padx=20)
+
         # Advanced Filters Section
         filters_frame = ttk.LabelFrame(input_frame, text=" Advanced Filters (Optional) ", padding=10)
         filters_frame.pack(fill=tk.X, pady=(10, 0))
@@ -1017,20 +1027,99 @@ class UnifiedDashboard:
         btn_clear_filters = ttk.Button(filter_row2, text="Clear All Filters", command=self.clear_filters)
         btn_clear_filters.pack(side=tk.RIGHT, padx=(10, 0))
 
-        # Results Section
+        # Results Section (Master-Detail View)
         results_frame = ttk.LabelFrame(frame, text=" Results ", padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Text area with tags for formatting
-        self.results_text = scrolledtext.ScrolledText(results_frame, font=("Consolas", 10), state=tk.DISABLED, wrap=tk.WORD)
-        self.results_text.pack(fill=tk.BOTH, expand=True)
+        # Paned Window for Split View
+        self.paned_results = ttk.PanedWindow(results_frame, orient=tk.HORIZONTAL)
+        self.paned_results.pack(fill=tk.BOTH, expand=True)
+
+        # LEFT PANE: Treeview (List of Results)
+        tree_frame = ttk.Frame(self.paned_results)
+        self.paned_results.add(tree_frame, weight=1)
+
+        # Treeview Columns
+        columns = ("entity", "type", "module", "score")
+        self.results_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
         
-        # Config tags
-        self.results_text.tag_config("header", font=("Arial", 11, "bold"), foreground=Theme.PRIMARY)
-        self.results_text.tag_config("highlight", background="#e6f3ff", foreground="#000")
-        self.results_text.tag_config("code", font=("Consolas", 9), background="#f5f5f5")
-        self.results_text.tag_config("success", foreground=Theme.SUCCESS)
-        self.results_text.tag_config("error", foreground=Theme.ERROR)
+        self.results_tree.heading("entity", text="Entity / File")
+        self.results_tree.heading("type", text="Type")
+        self.results_tree.heading("module", text="Module")
+        self.results_tree.heading("score", text="Match %")
+
+        self.results_tree.column("entity", width=250)
+        self.results_tree.column("type", width=80)
+        self.results_tree.column("module", width=100)
+        self.results_tree.column("score", width=80, anchor="e")
+
+        # Scrollbar for Tree
+        tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.results_tree.yview)
+        self.results_tree.configure(yscrollcommand=tree_scroll.set)
+        
+        self.results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind Selection
+        self.results_tree.bind("<<TreeviewSelect>>", self.on_result_selected)
+
+        # RIGHT PANE: Code Preview
+        preview_frame = ttk.Frame(self.paned_results)
+        self.paned_results.add(preview_frame, weight=2) # Give code more space
+
+        # Label for Preview
+        self.preview_label = ttk.Label(preview_frame, text="Select a result to view details", font=Theme.FONT_BOLD)
+        self.preview_label.pack(anchor=tk.W, pady=(0, 5))
+
+        # Text Area (Dual Scrollbars)
+        text_frame = ttk.Frame(preview_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.preview_text = tk.Text(
+            text_frame, 
+            font=("Consolas", 10), 
+            state=tk.DISABLED, 
+            wrap=tk.NONE, 
+            bg="#f8f8f8"
+        )
+        
+        v_scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.preview_text.yview)
+        h_scroll = ttk.Scrollbar(preview_frame, orient=tk.HORIZONTAL, command=self.preview_text.xview)
+        
+        self.preview_text.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+        self.preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Bind MouseWheel for scrolling (Windows/MacOS)
+        def _on_mousewheel(event):
+            self.preview_text.yview_scroll(int(-1*(event.delta/120)), "units")
+            return "break" # Prevent propagation
+
+        def _on_shift_mousewheel(event):
+            self.preview_text.xview_scroll(int(-1*(event.delta/120)), "units")
+            return "break"
+
+        self.preview_text.bind("<MouseWheel>", _on_mousewheel)
+        self.preview_text.bind("<Shift-MouseWheel>", _on_shift_mousewheel)
+
+        # Linux support (Button-4/5) if needed
+        self.preview_text.bind("<Button-4>", lambda e: self.preview_text.yview_scroll(-1, "units"))
+        self.preview_text.bind("<Button-5>", lambda e: self.preview_text.yview_scroll(1, "units"))
+        self.preview_text.bind("<Shift-Button-4>", lambda e: self.preview_text.xview_scroll(-1, "units"))
+        self.preview_text.bind("<Shift-Button-5>", lambda e: self.preview_text.xview_scroll(1, "units"))
+
+        # Configure Tags
+        self.preview_text.tag_config("header", font=("Arial", 11, "bold"), foreground=Theme.PRIMARY)
+        self.preview_text.tag_config("highlight", background="#e6f3ff", foreground="#000")
+        self.preview_text.tag_config("code", font=("Consolas", 10), background="#f8f8f8")
+        self.preview_text.tag_config("success", foreground=Theme.SUCCESS, font=("Arial", 9, "bold"))
+        self.preview_text.tag_config("error", foreground=Theme.ERROR)
+        self.preview_text.tag_config("meta", foreground="#666666", font=("Consolas", 9))
+
+        # Store results for lookup
+        self.current_results_data = []
 
         self.log_query_result("Ready to search. Enter a query above.")
 
@@ -1041,6 +1130,7 @@ class UnifiedDashboard:
             
         scope = self.query_scope_var.get()
         embed_model = self.embed_model_var.get()
+        use_reranker = self.use_reranker_var.get()
         
         self.log_query_result("Thinking...", clear=True)
         self.query_entry.config(state=tk.DISABLED)
@@ -1050,7 +1140,8 @@ class UnifiedDashboard:
             'entity_type': self.filter_entity_type_var.get(),
             'macro': self.filter_macro_var.get(),
             'file_type': self.filter_file_type_var.get(),
-            'boost_macros': self.filter_boost_macros_var.get()
+            'boost_macros': self.filter_boost_macros_var.get(),
+            'use_reranker': use_reranker
         }
 
         # Success callback
@@ -1073,71 +1164,178 @@ class UnifiedDashboard:
             error_callback=on_error
         )
 
+    def _get_dependency_tip(self, module_name):
+        """Get a helpful tip for adding a module to Build.cs"""
+        core_modules = {'Core', 'CoreUObject', 'Engine', 'InputCore', 'Slate', 'SlateCore'}
+        if module_name in core_modules or module_name == "Unknown":
+            return ""
+            
+        return f"Add \"{module_name}\" to PublicDependencyModuleNames in your Build.cs"
+
     def display_query_results(self, results):
-        self.results_text.config(state=tk.NORMAL)
-        self.results_text.delete(1.0, tk.END)
+        # Clear previous data
+        self.results_tree.delete(*self.results_tree.get_children())
+        self.current_results_data = [] # List to store full result objects
         
-        # 1. Intent/Reasoning
+        # Reset Preview
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete(1.0, tk.END)
+        self.preview_text.insert(tk.END, "Select a result from the list to view details.", "meta")
+        self.preview_text.config(state=tk.DISABLED)
+        self.preview_label.config(text="Query Results")
+
+        # 1. Intent/Reasoning (Log to preview initially)
         intent = results.get('intent', {})
-        self.results_text.insert(tk.END, f"Query Type: {intent.get('type', 'Unknown')}\n", "header")
-        if intent.get('entity_name'):
-            self.results_text.insert(tk.END, f"Target Entity: {intent.get('entity_name')}\n")
+        summary = f"Query Type: {intent.get('type', 'Unknown')} | Confidence: {intent.get('confidence', 0):.2f}"
+        if intent.get('reasoning'):
+            summary += f"\nReasoning: {intent.get('reasoning')}"
+        
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete(1.0, tk.END)
+        self.preview_text.insert(tk.END, summary + "\n\n", "header")
+        self.preview_text.config(state=tk.DISABLED)
 
-        # Show active filters if any
-        active_filters = []
-        if self.filter_entity_type_var.get():
-            active_filters.append(f"type={self.filter_entity_type_var.get()}")
-        if self.filter_macro_var.get():
-            active_filters.append(f"macro={self.filter_macro_var.get()}")
-        if self.filter_file_type_var.get():
-            active_filters.append(f"file={self.filter_file_type_var.get()}")
-        if self.filter_boost_macros_var.get():
-            active_filters.append("boost=macros")
-
-        if active_filters:
-            self.results_text.insert(tk.END, f"Active Filters: {', '.join(active_filters)}\n", "highlight")
-
-        reasoning = intent.get('reasoning')
-        if reasoning:
-            self.results_text.insert(tk.END, f"\nReasoning: {reasoning}\n", "code")
-
-        self.results_text.insert(tk.END, "-" * 60 + "\n\n")
-
-        # 2. Definitions
+        # 2. Populate Treeview
+        
+        # Definitions
         defs = results.get('definition_results', [])
-        if defs:
-            self.results_text.insert(tk.END, f"Found {len(defs)} Definitions:\n", "header")
-            for i, item in enumerate(defs, 1):
-                self.results_text.insert(tk.END, f"[{i}] {item['entity_type']} {item['entity_name']}\n", "highlight")
-                self.results_text.insert(tk.END, f"    File: {item['file_path']}:{item['line_start']}\n")
-                # Show snippet if available (first few lines)
-                defn = item.get('definition', '')
-                if defn:
-                    lines = defn.split('\n')[:5]
-                    snippet = '\n'.join(lines)
-                    self.results_text.insert(tk.END, f"{snippet}\n...\n\n", "code")
+        for item in defs:
+            idx = len(self.current_results_data)
+            self.current_results_data.append(item)
+            
+            entity = item.get('entity_name', 'Unknown')
+            etype = item.get('entity_type', 'Definition')
+            module = item.get('module', 'Unknown')
+            # Handle match_quality safely
+            mq = item.get('match_quality', 0)
+            if isinstance(mq, str):
+                try: mq = float(mq)
+                except: mq = 0
+            score = f"{mq*100:.0f}%"
+            
+            self.results_tree.insert("", tk.END, iid=idx, values=(entity, etype, module, score))
 
-        # 3. Semantic Results
+        # Semantic Results
         sems = results.get('semantic_results', [])
-        if sems:
-            self.results_text.insert(tk.END, f"Found {len(sems)} Semantic Matches:\n", "header")
-            for i, item in enumerate(sems, 1):
-                path = Path(item['path']).name
-                score = item.get('score', 0)
-                self.results_text.insert(tk.END, f"[{i}] {path} (Score: {score:.2f})\n", "highlight")
-                self.results_text.insert(tk.END, f"    Full Path: {item['path']}\n\n")
+        for item in sems:
+            idx = len(self.current_results_data)
+            # Tag item as semantic for the detail view
+            item['_is_semantic'] = True
+            self.current_results_data.append(item)
+            
+            path_obj = Path(item.get('path', 'Unknown'))
+            entity = path_obj.name
+            etype = "File/Sim"
+            
+            # Calculate Module on the fly if missing
+            module = item.get('module', 'Unknown')
+            if module == 'Unknown':
+                try:
+                    info = UEPathUtils.guess_module_and_include(item['path'])
+                    module = info['module']
+                    item['module'] = module # Cache it
+                    item['include'] = info['include']
+                except:
+                    pass
+            
+            score_val = item.get('score', 0)
+            score = f"{score_val*100:.0f}%"
+            
+            self.results_tree.insert("", tk.END, iid=idx, values=(entity, etype, module, score))
 
-        if not defs and not sems:
-            self.results_text.insert(tk.END, "No results found.", "error")
+        # Select first item if available
+        if self.results_tree.get_children():
+            first_id = self.results_tree.get_children()[0]
+            self.results_tree.selection_set(first_id)
+            # Trigger event manually
+            self.on_result_selected(None)
 
-        self.results_text.config(state=tk.DISABLED)
+    def on_result_selected(self, event):
+        selection = self.results_tree.selection()
+        if not selection:
+            return
+            
+        idx = int(selection[0])
+        if idx >= len(self.current_results_data):
+            return
+            
+        data = self.current_results_data[idx]
+        
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete(1.0, tk.END)
+        
+        # Display Logic based on type
+        if data.get('_is_semantic'):
+            self._display_semantic_detail(data)
+        else:
+            self._display_definition_detail(data)
+            
+        self.preview_text.config(state=tk.DISABLED)
+
+    def _display_definition_detail(self, data):
+        # Header
+        name = data.get('entity_name', 'Unknown')
+        etype = data.get('entity_type', 'Definition')
+        self.preview_label.config(text=f"{etype} {name}")
+        
+        # Metadata Card
+        module = data.get('module', 'Unknown')
+        include = data.get('include', '')
+        file_path = data.get('file_path', '')
+        line = data.get('line_start', 0)
+        
+        self.preview_text.insert(tk.END, f"Module:  {module}\n", "header")
+        
+        if include:
+            self.preview_text.insert(tk.END, f"Include: {include}\n", "code")
+            
+        # Dependency Tip
+        tip = self._get_dependency_tip(module)
+        if tip:
+            self.preview_text.insert(tk.END, f"Build.cs: {tip}\n", "success")
+            
+        self.preview_text.insert(tk.END, f"Location: {file_path}:{line}\n\n", "meta")
+        
+        # FULL CODE
+        defn = data.get('definition', '')
+        if defn:
+            self.preview_text.insert(tk.END, defn, "code")
+        else:
+            self.preview_text.insert(tk.END, "// No code definition available", "meta")
+
+    def _display_semantic_detail(self, data):
+        # Header
+        path = data.get('path', '')
+        name = Path(path).name
+        self.preview_label.config(text=f"File: {name}")
+        
+        # Metadata
+        module = data.get('module', 'Unknown')
+        include = data.get('include', '')
+        
+        self.preview_text.insert(tk.END, f"Module:  {module}\n", "header")
+        if include:
+            self.preview_text.insert(tk.END, f"Include: {include}\n", "code")
+            
+        self.preview_text.insert(tk.END, f"Path:    {path}\n\n", "meta")
+        
+        # Content/Context
+        # Semantic results usually have 'content' or we might need to read the file snippet?
+        # For now, show what we have.
+        if 'content' in data:
+             self.preview_text.insert(tk.END, data['content'], "code")
+        elif 'entities' in data:
+             self.preview_text.insert(tk.END, "Matched Concepts:\n", "header")
+             for e in data['entities']:
+                 self.preview_text.insert(tk.END, f" - {e}\n", "code")
 
     def log_query_result(self, message, clear=False, tag=None):
-        self.results_text.config(state=tk.NORMAL)
+        self.results_tree.delete(*self.results_tree.get_children())
+        self.preview_text.config(state=tk.NORMAL)
         if clear:
-            self.results_text.delete(1.0, tk.END)
-        self.results_text.insert(tk.END, message + "\n", tag)
-        self.results_text.config(state=tk.DISABLED)
+            self.preview_text.delete(1.0, tk.END)
+        self.preview_text.insert(tk.END, message + "\n", tag)
+        self.preview_text.config(state=tk.DISABLED)
 
     def clear_filters(self):
         """Clear all filter selections"""
@@ -2167,6 +2365,122 @@ class UnifiedDashboard:
             self.api_key_entry.config(show='')
         else:
             self.api_key_entry.config(show='*')
+
+    def build_file_search_tab(self):
+        """Build the 'Super File Search' tab for rapid file/path lookup"""
+        frame = ttk.Frame(self.tab_file_search, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Header/Instructions
+        ttk.Label(frame, text="Super File Search", font=("Arial", 14, "bold")).pack(anchor=tk.W)
+        ttk.Label(frame, text="Find where a class, struct, or concept is defined. Get includes and Build.cs dependencies instantly.", 
+                  font=("Arial", 10), foreground="#666").pack(anchor=tk.W, pady=(0, 15))
+
+        # Input Area
+        input_frame = tk.Frame(frame, bg=Theme.BG_LIGHT)
+        input_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.file_query_entry = ttk.Entry(input_frame, font=("Arial", 12))
+        self.file_query_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.file_query_entry.bind("<Return>", lambda e: self.perform_file_search())
+
+        btn_file_search = ttk.Button(input_frame, text="Find File", command=self.perform_file_search, style="Accent.TButton")
+        btn_file_search.pack(side=tk.LEFT)
+
+        # Results area (Clean list style)
+        self.file_results_frame = ttk.Frame(frame)
+        self.file_results_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Using a scrolled text but with cleaner formatting for "File Cards"
+        self.file_results_text = scrolledtext.ScrolledText(self.file_results_frame, font=("Consolas", 10), state=tk.DISABLED, wrap=tk.WORD)
+        self.file_results_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Formatting tags
+        self.file_results_text.tag_config("file_card", background="#ffffff", spacing1=10, spacing3=10, lmargin1=10, lmargin2=10)
+        self.file_results_text.tag_config("file_name", font=("Arial", 12, "bold"), foreground=Theme.PRIMARY)
+        self.file_results_text.tag_config("include_path", font=("Consolas", 11, "bold"), foreground="#2980b9", background="#f0f7fb")
+        self.file_results_text.tag_config("module_tag", font=("Arial", 10, "bold"), foreground="#27ae60")
+        self.file_results_text.tag_config("build_tip", font=("Arial", 9, "italic"), foreground="#e67e22")
+
+    def perform_file_search(self):
+        query = self.file_query_entry.get().strip()
+        if not query: return
+
+        # Force "where is" style logic in backend
+        augmented_query = f"where is file for {query}"
+        
+        self.file_results_text.config(state=tk.NORMAL)
+        self.file_results_text.delete(1.0, tk.END)
+        self.file_results_text.insert(tk.END, f"Searching for '{query}'...\n")
+        self.file_results_text.config(state=tk.DISABLED)
+
+        def on_success(results):
+            self.root.after(0, lambda: self._display_file_results(results))
+
+        # Use the same search service but we'll format differently
+        self.search_service.execute_query(
+            query=augmented_query,
+            scope="all",
+            embed_model=self.embed_model_var.get(),
+            filter_vars={'use_reranker': True}, # High precision for file search
+            callback=on_success,
+            error_callback=lambda err: self.root.after(0, lambda: messagebox.showerror("Search Error", err))
+        )
+
+    def _display_file_results(self, results):
+        self.file_results_text.config(state=tk.NORMAL)
+        self.file_results_text.delete(1.0, tk.END)
+
+        # Combine and deduplicate files across both types of results
+        all_items = []
+        seen_paths = set()
+
+        # Definitions (highest precision)
+        for d in results.get('definition_results', []):
+            path = d['file_path']
+            if path not in seen_paths:
+                all_items.append(('definition', d))
+                seen_paths.add(path)
+
+        # Semantic (concept matches)
+        for s in results.get('semantic_results', []):
+            path = s['path']
+            if path not in seen_paths:
+                all_items.append(('semantic', s))
+                seen_paths.add(path)
+
+        if not all_items:
+            self.file_results_text.insert(tk.END, "No matching files found.", "error")
+        else:
+            for i, (kind, item) in enumerate(all_items, 1):
+                path = item.get('file_path') or item.get('path')
+                name = Path(path).name
+                
+                # Resolve include/module
+                path_info = UEPathUtils.guess_module_and_include(path)
+                include = path_info['include']
+                module = path_info['module']
+                
+                # Draw Card
+                self.file_results_text.insert(tk.END, f" {name} ", "file_name")
+                self.file_results_text.insert(tk.END, f" [Module: {module}]\n", "module_tag")
+                
+                self.file_results_text.insert(tk.END, f"  {include}\n", "include_path")
+                
+                # Dependency Tip
+                tip = self._get_dependency_tip(module)
+                if tip:
+                    self.file_results_text.insert(tk.END, f"  Dependency: {tip}\n", "build_tip")
+                
+                self.file_results_text.insert(tk.END, f"  Path: {path}\n")
+                
+                if kind == 'definition':
+                    # Add type hint
+                    self.file_results_text.insert(tk.END, f"  Defined: {item['entity_type']} {item['entity_name']}\n")
+
+                self.file_results_text.insert(tk.END, "-" * 40 + "\n")
+
+        self.file_results_text.config(state=tk.DISABLED)
 
     def build_maintenance_tab(self):
         frame = ttk.Frame(self.tab_maintenance, padding=20)

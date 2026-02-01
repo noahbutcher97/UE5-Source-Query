@@ -56,6 +56,8 @@ class FilteredSearch:
         boost_macros: bool = False,
         # Logical compensation for poor models
         use_logical_boosts: bool = True,
+        # Text query for sparse scoring
+        query_text: Optional[str] = None,
         query_type: Optional[str] = None  # 'definition', 'hybrid', 'semantic'
     ) -> List[Dict]:
         """
@@ -74,11 +76,12 @@ class FilteredSearch:
             file_type: 'header' or 'implementation'
             boost_entities: List of entities to boost in ranking
             boost_macros: Boost chunks with UE5 macros
+            query_text: Raw query text for keyword/sparse scoring boost
 
         Returns:
             List of results with scores
         """
-        # Calculate base similarity scores
+        # Calculate base similarity scores (Dense Score)
         scores = self.embeddings @ query_vec
 
         # Apply filters
@@ -92,6 +95,14 @@ class FilteredSearch:
             has_ustruct=has_ustruct,
             file_type=file_type
         )
+
+        # Apply sparse scoring (Keyword Boost)
+        if query_text:
+            sparse_scores = self._calculate_sparse_score(query_text, valid_indices)
+            # Combine: Dense + 0.3 * Sparse
+            # This ensures strong keyword matches bubble up
+            for i, idx in enumerate(valid_indices):
+                scores[idx] += sparse_scores[i]
 
         # Apply boosting
         if boost_entities or boost_macros:
@@ -125,6 +136,53 @@ class FilteredSearch:
                 results.append(result)
 
         return results
+
+    def _calculate_sparse_score(self, query: str, indices: List[int]) -> np.ndarray:
+        """
+        Calculate sparse (keyword) score for selected indices.
+        Simple BM25-lite approach: favors matches in file names and entities.
+        """
+        if not query or not indices:
+            return np.zeros(0) if not indices else np.zeros(len(indices))
+
+        query_tokens = set(query.lower().split())
+        # Remove common stop words to reduce noise
+        stop_words = {'the', 'a', 'an', 'in', 'on', 'at', 'for', 'to', 'of', 'is', 'are', 'how', 'why', 'what'}
+        query_tokens -= stop_words
+        
+        if not query_tokens:
+            return np.zeros(len(indices))
+
+        sparse_scores = np.zeros(len(indices))
+        
+        for i, idx in enumerate(indices):
+            meta = self.metadata[idx]
+            score = 0.0
+            
+            # Check path (High value for file name matches)
+            path_str = str(meta.get('path', '')).lower()
+            file_name = Path(path_str).name
+            
+            # Check entities (High value)
+            entities = [str(e).lower() for e in meta.get('entities', [])]
+            
+            for token in query_tokens:
+                # File Name match (Strong signal)
+                if token in file_name:
+                    score += 0.4
+                elif token in path_str:
+                    score += 0.1
+                
+                # Exact entity match
+                if token in entities:
+                    score += 0.5
+                # Partial entity match
+                elif any(token in e for e in entities):
+                    score += 0.2
+                    
+            sparse_scores[i] = score
+            
+        return sparse_scores
 
     def _apply_filters(
         self,

@@ -75,9 +75,15 @@ class QueryIntentAnalyzer:
 
     # Keywords that suggest conceptual/semantic search
     CONCEPTUAL_KEYWORDS = [
-        'how', 'why', 'when', 'where', 'explain', 'describe',
+        'how', 'why', 'when', 'explain', 'describe',
         'difference between', 'compare', 'best practice',
         'example', 'tutorial', 'guide', 'work', 'works', 'working'
+    ]
+
+    # Keywords that suggest file/location search
+    FILE_KEYWORDS = [
+        'file', 'location', 'path', 'where is', 'find the file',
+        'header', 'source', 'directory', 'folder'
     ]
 
     # Keywords that suggest definition search
@@ -98,6 +104,7 @@ class QueryIntentAnalyzer:
 
         # Check for conceptual query indicators
         is_conceptual = any(kw in query_lower for kw in self.CONCEPTUAL_KEYWORDS)
+        is_file_search = any(kw in query_lower for kw in self.FILE_KEYWORDS)
         has_definition_hints = any(kw in query_lower for kw in self.DEFINITION_KEYWORDS)
 
         # Try to extract entity names from query
@@ -111,7 +118,7 @@ class QueryIntentAnalyzer:
             # Check if query is mostly just the entity name (bare lookup)
             # Strip common words and see if entity name dominates
             query_words = query.split()
-            significant_words = [w for w in query_words if len(w) > 2 and w.lower() not in ['the', 'what', 'where', 'find', 'show']]
+            significant_words = [w for w in query_words if len(w) > 2 and w.lower() not in ['the', 'what', 'where', 'find', 'show', 'file']]
             
             # Check if any significant word is a definition keyword (e.g., "members")
             # If so, it's not a "bare" entity lookup, it's a specific request (Hybrid)
@@ -135,8 +142,8 @@ class QueryIntentAnalyzer:
                     reasoning=f"Bare entity name detected: {entity_type.value} {entity_name}"
                 )
 
-        if entity_candidates and has_definition_hints and not is_conceptual:
-            # Query like "FHitResult members" - try hybrid approach
+        if entity_candidates and (has_definition_hints or is_file_search) and not is_conceptual:
+            # Query like "FHitResult members" or "where is AActor" - try hybrid approach
             entity_name, entity_type = entity_candidates[0]
             enhanced = self._enhance_query(query, entity_name, entity_type)
 
@@ -144,9 +151,9 @@ class QueryIntentAnalyzer:
                 query_type=QueryType.HYBRID,
                 entity_type=entity_type,
                 entity_name=entity_name,
-                confidence=0.7,
+                confidence=0.75,
                 enhanced_query=enhanced,
-                reasoning=f"Detected entity '{entity_name}' with definition keywords, using hybrid search"
+                reasoning=f"Detected entity '{entity_name}' with {'file' if is_file_search else 'definition'} keywords, using hybrid search"
             )
 
         if is_conceptual:
@@ -158,6 +165,16 @@ class QueryIntentAnalyzer:
                 confidence=0.9,
                 enhanced_query=query,
                 reasoning="Conceptual question detected, using semantic search"
+            )
+
+        if is_file_search:
+             return QueryIntent(
+                query_type=QueryType.SEMANTIC, # Stay semantic but we'll prioritize file matches in engine
+                entity_type=None,
+                entity_name=None,
+                confidence=0.8,
+                enhanced_query=query,
+                reasoning="File/Location query detected"
             )
 
         # Default to semantic search with possible query enhancement
@@ -218,7 +235,7 @@ class QueryIntentAnalyzer:
                     # If it was an action like "show me", we don't know the type yet
                     # So we infer it from the name
                     if entity_type == EntityType.UNKNOWN:
-                        entity_type = self._infer_entity_type(entity_name)
+                        entity_type = self.infer_entity_type(entity_name)
 
                     return QueryIntent(
                         query_type=QueryType.DEFINITION,
@@ -245,6 +262,12 @@ class QueryIntentAnalyzer:
 
         return None
 
+    # Words to ignore when extracting entity names (even if capitalized)
+    QUESTION_STOP_WORDS = {
+        'What', 'How', 'Where', 'Who', 'When', 'Why', 'Show', 'Find', 'Get', 'The', 
+        'Tell', 'Explain', 'Describe', 'Does', 'Is', 'Are', 'In', 'Which', 'Please'
+    }
+
     def _extract_entity_names(self, query: str) -> List[Tuple[str, EntityType]]:
         """Extract potential UE5 entity names from query"""
         candidates = []
@@ -253,13 +276,17 @@ class QueryIntentAnalyzer:
         words = re.findall(r'\b[A-Z]\w+\b', query)
 
         for word in words:
-            entity_type = self._infer_entity_type(word)
+            # Skip common question/instruction words
+            if word in self.QUESTION_STOP_WORDS:
+                continue
+                
+            entity_type = self.infer_entity_type(word)
             if entity_type != EntityType.UNKNOWN:
                 candidates.append((word, entity_type))
 
         return candidates
 
-    def _infer_entity_type(self, name: str) -> EntityType:
+    def infer_entity_type(self, name: str) -> EntityType:
         """Infer entity type from UE5 naming convention"""
         if self.STRUCT_PREFIX.match(name):
             return EntityType.STRUCT
