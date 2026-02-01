@@ -139,6 +139,35 @@ class AssistantView:
         else:
             self._start_chat_stream(content, context="")
 
+    def ask_about_code(self, code_snippet: str, entity_name: str, file_path: str = ""):
+        """
+        External entry point: Explain a specific code snippet.
+        Used by the Query Tab's context menu.
+        """
+        if self.is_generating: return
+
+        # 1. Prepare UI
+        query = f"Explain the {entity_name} code."
+        self.input_text.delete("1.0", tk.END)
+        self.append_message("User", query, "user")
+        self.chat_history.append({"role": "user", "content": query})
+        
+        self.is_generating = True
+        self.btn_send.config(state=tk.DISABLED)
+        
+        # 2. Build explicit context
+        # We simulate what ContextBuilder does but for a single targeted item
+        context = f"""<context>
+    <definition name="{entity_name}" file="{file_path}">
+{code_snippet}
+    </definition>
+</context>"""
+
+        self.append_status_message(f"Focusing on {entity_name}...")
+
+        # 3. Start Chat
+        self._start_chat_stream(query, context)
+
     def _execute_search_and_chat(self, query):
         """Run background search then start chat"""
         self.append_status_message("Analyzing codebase...")

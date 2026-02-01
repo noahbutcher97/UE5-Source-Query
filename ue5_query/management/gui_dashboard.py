@@ -1073,6 +1073,13 @@ class UnifiedDashboard:
 
         # Bind Selection
         self.results_tree.bind("<<TreeviewSelect>>", self.on_result_selected)
+        
+        # Context Menu (Right Click)
+        self.context_menu = tk.Menu(self.results_tree, tearoff=0)
+        self.context_menu.add_command(label="Explain in AI Assistant", command=self.explain_selection_in_assistant)
+        
+        # Bind Right Click (Windows/Unix differ slightly, Button-3 is standard)
+        self.results_tree.bind("<Button-3>", self.show_context_menu)
 
         # RIGHT PANE: Code Preview
         preview_frame = ttk.Frame(self.paned_results)
@@ -1260,6 +1267,41 @@ class UnifiedDashboard:
             self.results_tree.selection_set(first_id)
             # Trigger event manually
             self.on_result_selected(None)
+
+    def show_context_menu(self, event):
+        """Show context menu on tree item"""
+        item_id = self.results_tree.identify_row(event.y)
+        if item_id:
+            self.results_tree.selection_set(item_id)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def explain_selection_in_assistant(self):
+        """Send selected code to Assistant tab"""
+        selection = self.results_tree.selection()
+        if not selection: return
+        
+        idx = int(selection[0])
+        if idx >= len(self.current_results_data): return
+        
+        data = self.current_results_data[idx]
+        
+        # Extract details
+        if data.get('_is_semantic'):
+            name = Path(data.get('path', 'Unknown')).name
+            code = data.get('content') or "# (Content not fully loaded, check preview)"
+            # Try to grab what's in the preview text if possible, or reload?
+            # For now, let's assume we want to ask about the file conceptually if code is missing
+            file_path = data.get('path', '')
+        else:
+            name = data.get('entity_name', 'Unknown')
+            code = data.get('definition', '')
+            file_path = data.get('file_path', '')
+
+        # Switch Tab
+        self.notebook.select(self.tab_assistant)
+        
+        # Trigger Assistant
+        self.assistant_view.ask_about_code(code, name, file_path)
 
     def on_result_selected(self, event):
         selection = self.results_tree.selection()
