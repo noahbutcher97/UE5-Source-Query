@@ -7,12 +7,14 @@ from pathlib import Path
 try:
     from ue5_query.utils.gui_theme import Theme
     from ue5_query.utils.engine_helper import resolve_uproject_source
+    from ue5_query.management.views.batch_folder_dialog import BatchFolderDialog
 except ImportError:
     # If run standalone
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
         from ue5_query.utils.gui_theme import Theme
         from ue5_query.utils.engine_helper import resolve_uproject_source
+        from ue5_query.management.views.batch_folder_dialog import BatchFolderDialog
     except ImportError:
         Theme = None
 
@@ -93,6 +95,7 @@ class SourceManagerTab:
         btn_frame.pack(fill=tk.X, pady=10)
         
         ttk.Button(btn_frame, text="+ Add Folder", command=self.add_project_folder, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="+ Add Multiple (Batch)", command=self.add_batch_folders).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="+ Add .uproject", command=self.add_project_uproject, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="- Remove Selected", command=self.remove_project_folder).pack(side=tk.LEFT)
 
@@ -170,6 +173,18 @@ class SourceManagerTab:
                 self.refresh_project_list()
             else:
                 messagebox.showinfo("Info", "Directory already exists in list.")
+
+    def add_batch_folders(self):
+        """Open batch selection dialog"""
+        def _on_add(paths):
+            count = 0
+            for p in paths:
+                if self.source_manager.add_project_dir(p):
+                    count += 1
+            self.refresh_project_list()
+            messagebox.showinfo("Batch Add", f"Successfully added {count} folders.")
+
+        BatchFolderDialog(self.frame.winfo_toplevel(), on_add=_on_add)
 
     def remove_project_folder(self):
         sel = self.project_listbox.curselection()
