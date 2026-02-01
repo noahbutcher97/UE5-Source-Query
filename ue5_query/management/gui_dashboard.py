@@ -171,7 +171,8 @@ class UnifiedDashboard:
         # 3. AI Assistant Tab (NEW)
         self.tab_assistant = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_assistant, text="AI Assistant")
-        self.assistant_view = AssistantView(self.notebook, self.ai_service)
+        # Pass search_service to enable RAG features
+        self.assistant_view = AssistantView(self.notebook, self.ai_service, self.search_service)
         # Reparent the view's frame to our tab
         self.assistant_view.frame.pack(in_=self.tab_assistant, fill=tk.BOTH, expand=True)
 
