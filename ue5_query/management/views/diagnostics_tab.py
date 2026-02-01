@@ -275,33 +275,33 @@ class DiagnosticsTab:
 
     def run_vector_validation(self):
         """Run vector store validation"""
-        self.log_diag("Running vector store validation...", clear=True)
-
-        def _run():
-            script = self.script_dir / "src" / "utils" / "verify_vector_store.py"
+        # Run check
+        # Use -m module execution to avoid path issues
+        cmd = [sys.executable, "-m", "ue5_query.utils.verify_vector_store"]
+        
+        self.log_diag(f"Running: {' '.join(cmd)}", clear=True)
+        
+        def run():
             try:
-                process = subprocess.Popen(
-                    [sys.executable, str(script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
                     text=True,
                     cwd=str(self.script_dir)
                 )
-
-                for line in process.stdout:
-                    self.root.after(0, lambda l=line: self.log_diag(l.rstrip(), append=True))
-
-                process.wait()
-
-                if process.returncode == 0:
-                    self.root.after(0, lambda: self.log_diag("\n[SUCCESS] Vector store is valid", append=True))
+                
+                output = result.stdout + result.stderr
+                self.dashboard.root.after(0, lambda: self.log_diag(output, append=True))
+                
+                if result.returncode == 0:
+                    self.dashboard.root.after(0, lambda: messagebox.showinfo("Validation", "Vector store is valid!"))
                 else:
-                    self.root.after(0, lambda: self.log_diag("\n[WARNING] Vector store issues detected", append=True))
-
+                    self.dashboard.root.after(0, lambda: messagebox.showwarning("Validation", "Issues detected. See output log."))
+                    
             except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log_diag(f"\nError: {err}", append=True))
+                self.dashboard.root.after(0, lambda: self.log_diag(f"Error: {e}", append=True))
 
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
 
     def run_test_suite(self, suite_name):
         """Run specific test suite"""

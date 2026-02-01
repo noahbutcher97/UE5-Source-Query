@@ -1783,33 +1783,37 @@ class UnifiedDashboard:
 
     def run_vector_validation(self):
         """Run vector store validation"""
-        self.log_diag("Running vector store validation...", clear=True)
-
-        def _run():
-            script = self.script_dir / "src" / "utils" / "verify_vector_store.py"
+        # Run check
+        # We need to run it as a subprocess to capture output clearly
+        # Use -m module execution to avoid path issues
+        cmd = [sys.executable, "-m", "ue5_query.utils.verify_vector_store"]
+        
+        self.log_diag(f"Running: {' '.join(cmd)}", clear=True)
+        
+        def run():
             try:
-                process = subprocess.Popen(
-                    [sys.executable, str(script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
                     text=True,
                     cwd=str(self.script_dir)
                 )
-
-                for line in process.stdout:
-                    self.root.after(0, lambda l=line: self.log_diag(l.rstrip(), append=True))
-
-                process.wait()
-
-                if process.returncode == 0:
-                    self.root.after(0, lambda: self.log_diag("\n[SUCCESS] Vector store is valid", append=True))
+                
+                # Filter noise
+                output = result.stdout + result.stderr
+                # Remove common spam lines if any
+                
+                self.root.after(0, lambda: self.log_diag(output, append=True))
+                
+                if result.returncode == 0:
+                    self.root.after(0, lambda: messagebox.showinfo("Validation", "Vector store is valid!"))
                 else:
-                    self.root.after(0, lambda: self.log_diag("\n[WARNING] Vector store issues detected", append=True))
-
+                    self.root.after(0, lambda: messagebox.showwarning("Validation", "Issues detected. See output log."))
+                    
             except Exception as e:
-                self.root.after(0, lambda err=str(e): self.log_diag(f"\nError: {err}", append=True))
+                self.root.after(0, lambda: self.log_diag(f"Error: {e}", append=True))
 
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
 
     def run_test_suite(self, suite_name):
         """Run specific test suite"""
@@ -2721,6 +2725,27 @@ class UnifiedDashboard:
                 self.lbl_index_status.config(text="Index Status: Error Checking File", foreground=Theme.ERROR)
         else:
             self.lbl_index_status.config(text="Index Status: Not Found", foreground=Theme.ERROR)
+
+    def log_maint(self, msg, clear=False, append=False):
+        """Log to maintenance tab (Compatibility Wrapper)"""
+        # If we have a view object, delegate
+        if hasattr(self, 'maint_tab_view'):
+            self.maint_tab_view.log_maint(msg, clear, append)
+            return
+
+        # Fallback: direct widget access if old style
+        if not hasattr(self, 'maint_log'):
+            print(f"[LOG] {msg}")
+            return
+
+        self.maint_log.config(state=tk.NORMAL)
+        if clear:
+            self.maint_log.delete(1.0, tk.END)
+        
+        self.maint_log.insert(tk.END, msg + "\n")
+        if append:
+            self.maint_log.see(tk.END)
+        self.maint_log.config(state=tk.DISABLED)
 
     def rebuild_index(self):
         if not messagebox.askyesno("Confirm", "Rebuild vector index? This may take 5-15 minutes."):
