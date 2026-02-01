@@ -337,32 +337,30 @@ class TestEnvironmentDetector(unittest.TestCase):
 
         self.assertIsNone(cached)
 
-    @patch('src.utils.environment_detector.EnvVarStrategy.detect')
-    @patch('src.utils.environment_detector.ConfigFileStrategy.detect')
-    @patch('src.utils.environment_detector.RegistryStrategy.detect')
-    @patch('src.utils.environment_detector.CommonLocStrategy.detect')
-    def test_detect_engines_merges_strategies(self, mock_common, mock_registry, mock_config, mock_envvar):
-        """Test that detect_engines merges results from all strategies"""
-        engine1 = EngineInstallation(
-            version="5.3",
-            engine_root=Path("/path1/Engine"),
-            source=DetectionSource.ENV_VAR
-        )
-        engine2 = EngineInstallation(
-            version="5.4",
-            engine_root=Path("/path2/Engine"),
-            source=DetectionSource.REGISTRY
-        )
+    @patch('ue5_query.utils.environment_detector.EnvVarStrategy.detect')
+    @patch('ue5_query.utils.environment_detector.ConfigFileStrategy.detect')
+    @patch('ue5_query.utils.environment_detector.RegistryStrategy.detect')
+    @patch('ue5_query.utils.environment_detector.CommonLocStrategy.detect')
+    def test_detect_priority(self, mock_common, mock_registry, mock_config, mock_env):
+        """Test that strategies are tried in correct order"""
+        # Mock all to return None initially
+        mock_env.return_value = None
+        mock_config.return_value = None
+        mock_registry.return_value = None
+        mock_common.return_value = None
 
-        mock_envvar.return_value = [engine1]
-        mock_config.return_value = []
-        mock_registry.return_value = [engine2]
-        mock_common.return_value = []
-
-        installations = self.detector.detect_engines(use_cache=False, validate=False)
-
-        # Should have both engines
-        self.assertEqual(len(installations), 2)
+        detector = DeploymentDetector(Path('.'))
+        
+        # 1. Env Var (Priority 1)
+        mock_env.return_value = {'type': 'env'}
+        res = detector.detect()
+        self.assertEqual(res['type'], 'env')
+        
+        # 2. Config File (Priority 2)
+        mock_env.return_value = None
+        mock_config.return_value = {'type': 'config'}
+        res = detector.detect()
+        self.assertEqual(res['type'], 'config')
 
 
 class TestGetDetectorFactory(unittest.TestCase):

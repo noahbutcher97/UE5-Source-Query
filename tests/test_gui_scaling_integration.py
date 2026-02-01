@@ -45,15 +45,13 @@ class TestDashboardScaling(unittest.TestCase):
         shutil.rmtree(self.test_dir)
         LayoutMetrics._instance = None
 
-    @patch("src.management.gui_dashboard.ConfigManager")
-    @patch("src.management.gui_dashboard.LayoutMetrics")
-    @patch("src.management.gui_dashboard.Theme")
-    # WindowManager is used in __init__, so we should mock it or ensure it works with mock root
-    def test_dashboard_initializes_scale(self, mock_theme, mock_metrics_cls, mock_cm_cls):
-        """Test dashboard loads scale from config"""
-        # Mock ConfigManager behavior
-        mock_cm = mock_cm_cls.return_value
-        mock_cm.get.side_effect = lambda k, d=None: "1.5" if k == "GUI_TEXT_SCALE" else d
+    @patch("ue5_query.management.gui_dashboard.ConfigManager")
+    @patch("ue5_query.management.gui_dashboard.LayoutMetrics")
+    @patch("ue5_query.management.gui_dashboard.Theme")
+    def test_gui_init_with_scaling(self, mock_theme, mock_metrics, mock_config):
+        """Test dashboard initialization with different scaling factors"""
+        root = MagicMock()
+        mock_config.return_value.get_scale_factor.return_value = 1.5
         
         # Mock Metrics
         mock_metrics = mock_metrics_cls.return_value
@@ -81,10 +79,10 @@ class TestDashboardScaling(unittest.TestCase):
                 # Check calls
                 mock_cm.get.assert_any_call('GUI_TEXT_SCALE', mock_metrics.text_scale)
 
-    @patch("src.management.gui_dashboard.ConfigManager")
-    @patch("src.management.gui_dashboard.LayoutMetrics")
-    @patch("src.management.gui_dashboard.messagebox")
-    def test_apply_ui_scale(self, mock_msgbox, mock_metrics_cls, mock_cm_cls):
+    @patch("ue5_query.management.gui_dashboard.ConfigManager")
+    @patch("ue5_query.management.gui_dashboard.LayoutMetrics")
+    @patch("ue5_query.management.gui_dashboard.messagebox")
+    def test_manual_scale_override(self, mock_msg, mock_metrics, mock_config):
         """Test applying scale saves config and prompts restart"""
         mock_cm = mock_cm_cls.return_value
         mock_metrics = mock_metrics_cls.return_value

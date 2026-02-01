@@ -1900,14 +1900,15 @@ class UnifiedDashboard:
         def _run():
             self.root.after(0, lambda: self.log_diag("Testing core module imports...\n", append=True))
 
-            test_imports = [
-                ("Core Query Engine", "src.core.hybrid_query", "HybridQueryEngine"),
-                ("Definition Extractor", "src.core.definition_extractor", "DefinitionExtractor"),
-                ("Query Intent", "src.core.query_intent", "QueryIntentAnalyzer"),
-                ("Deployment Detector", "src.utils.deployment_detector", "DeploymentDetector"),
-                ("Source Manager", "src.utils.source_manager", "SourceManager"),
-                ("Config Manager", "src.utils.config_manager", "ConfigManager"),
-            ]
+        # Import core modules
+        imports = [
+            ("Core Query Engine", "ue5_query.core.hybrid_query", "HybridQueryEngine"),
+            ("Definition Extractor", "ue5_query.core.definition_extractor", "DefinitionExtractor"),
+            ("Query Intent", "ue5_query.core.query_intent", "QueryIntentAnalyzer"),
+            ("Deployment Detector", "ue5_query.utils.deployment_detector", "DeploymentDetector"),
+            ("Source Manager", "ue5_query.utils.source_manager", "SourceManager"),
+            ("Config Manager", "ue5_query.utils.config_manager", "ConfigManager"),
+        ]
 
             passed = 0
             failed = 0
