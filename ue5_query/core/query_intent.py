@@ -39,6 +39,9 @@ class QueryIntent:
 
     # Explanation for debugging
     reasoning: str
+    
+    # Flags for specific search behaviors
+    is_file_search: bool = False
 
 
 class QueryIntentAnalyzer:
@@ -174,7 +177,8 @@ class QueryIntentAnalyzer:
                 entity_name=None,
                 confidence=0.8,
                 enhanced_query=query,
-                reasoning="File/Location query detected"
+                reasoning="File/Location query detected",
+                is_file_search=True
             )
 
         # Default to semantic search with possible query enhancement

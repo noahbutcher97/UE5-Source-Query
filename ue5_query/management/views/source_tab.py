@@ -68,6 +68,7 @@ class SourceManagerTab:
         e_btn_frame = ttk.Frame(engine_frame)
         e_btn_frame.pack(fill=tk.X, pady=5)
         ttk.Button(e_btn_frame, text="+ Add Path", command=self.add_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(e_btn_frame, text="+ Add Multiple (Batch)", command=self.add_batch_engine_dirs).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(e_btn_frame, text="- Remove Selected", command=self.remove_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(e_btn_frame, text="Reset to Default", command=self.reset_engine_dirs).pack(side=tk.LEFT)
         
@@ -130,10 +131,55 @@ class SourceManagerTab:
                 except ValueError:
                     pass
             
-            if self.source_manager.add_engine_dir(path_str):
+            success, msg = self.source_manager.add_engine_dir(path_str)
+            if success:
                 self.refresh_engine_list()
+                if msg != "Path added successfully.":
+                    messagebox.showinfo("Optimization", msg)
             else:
-                messagebox.showinfo("Info", "Directory already in list.")
+                messagebox.showinfo("Info", msg)
+
+    def add_batch_engine_dirs(self):
+        engine_root = self.engine_path_var.get().strip()
+        start_dir = "/"
+        if engine_root and Path(engine_root).exists():
+             start_dir = str(Path(engine_root) / "Source")
+             if not Path(start_dir).exists():
+                 start_dir = engine_root
+
+        def _on_add(paths):
+            count = 0
+            messages = []
+            for p in paths:
+                path_obj = Path(p)
+                path_str = str(path_obj)
+                
+                # Try to replace engine root with placeholder
+                if engine_root:
+                    root_obj = Path(engine_root)
+                    try:
+                        rel_path = path_obj.relative_to(root_obj)
+                        path_str = str(Path("{ENGINE_ROOT}") / rel_path)
+                    except ValueError:
+                        pass
+                
+                success, msg = self.source_manager.add_engine_dir(path_str)
+                if success:
+                    count += 1
+                if msg != "Path added successfully.":
+                    messages.append(f"{Path(p).name}: {msg}")
+
+            self.refresh_engine_list()
+            
+            summary = f"Processed {len(paths)} paths.\nAdded: {count}"
+            if messages:
+                summary += "\n\nDetails:\n" + "\n".join(messages[:10])
+                if len(messages) > 10:
+                    summary += f"\n...and {len(messages)-10} more."
+            
+            messagebox.showinfo("Batch Add", summary)
+
+        BatchFolderDialog(self.frame.winfo_toplevel(), initial_dir=start_dir, on_add=_on_add)
 
     def remove_engine_dir(self):
         sel = self.engine_listbox.curselection()
@@ -158,31 +204,48 @@ class SourceManagerTab:
         if path:
             source_dir = resolve_uproject_source(path)
             if source_dir:
-                if self.source_manager.add_project_dir(source_dir):
+                success, msg = self.source_manager.add_project_dir(source_dir)
+                if success:
                     self.refresh_project_list()
-                    messagebox.showinfo("Success", f"Added project source: {source_dir}")
+                    if msg != "Path added successfully.":
+                        messagebox.showinfo("Optimization", msg)
+                    else:
+                        messagebox.showinfo("Success", f"Added project source: {source_dir}")
                 else:
-                    messagebox.showinfo("Info", "Directory already exists in list.")
+                    messagebox.showinfo("Info", msg)
             else:
                 messagebox.showerror("Error", "Could not find 'Source' directory next to .uproject file.")
 
     def add_project_folder(self):
         path = filedialog.askdirectory(title="Select Project Source Folder")
         if path:
-            if self.source_manager.add_project_dir(path):
+            success, msg = self.source_manager.add_project_dir(path)
+            if success:
                 self.refresh_project_list()
+                if msg != "Path added successfully.":
+                    messagebox.showinfo("Optimization", msg)
             else:
-                messagebox.showinfo("Info", "Directory already exists in list.")
+                messagebox.showinfo("Info", msg)
 
     def add_batch_folders(self):
         """Open batch selection dialog"""
         def _on_add(paths):
             count = 0
+            messages = []
             for p in paths:
-                if self.source_manager.add_project_dir(p):
+                success, msg = self.source_manager.add_project_dir(p)
+                if success:
                     count += 1
+                if msg != "Path added successfully.":
+                    messages.append(f"{Path(p).name}: {msg}")
+                    
             self.refresh_project_list()
-            messagebox.showinfo("Batch Add", f"Successfully added {count} folders.")
+            summary = f"Processed {len(paths)} paths.\nAdded: {count}"
+            if messages:
+                summary += "\n\nDetails:\n" + "\n".join(messages[:10])
+                if len(messages) > 10:
+                    summary += f"\n...and {len(messages)-10} more."
+            messagebox.showinfo("Batch Add", summary)
 
         BatchFolderDialog(self.frame.winfo_toplevel(), on_add=_on_add)
 

@@ -311,7 +311,7 @@ class StatusTab:
         try:
             from ue5_query.utils.deployment_detector import DeploymentRegistry
             registry = DeploymentRegistry(self.dashboard.script_dir)
-            deployments = registry.list_deployments()
+            deployments = registry.get_all_deployments()
 
             count_frame = tk.Frame(dev_frame, bg=Theme.BG_LIGHT)
             count_frame.pack(fill=tk.X, pady=5)
@@ -338,10 +338,10 @@ class StatusTab:
                 list_frame = tk.Frame(dev_frame, bg=Theme.BG_LIGHT, pady=5)
                 list_frame.pack(fill=tk.X)
 
-                for path, info in list(deployments.items())[:3]:  # Show top 3
+                for deploy in deployments[:3]:  # Show top 3
                     tk.Label(
                         list_frame,
-                        text=f"• {path}",
+                        text=f"• {deploy.path}",
                         font=("Arial", 9),
                         bg=Theme.BG_LIGHT,
                         fg="#7F8C8D"
@@ -400,7 +400,7 @@ class StatusTab:
             update_btn = tk.Button(
                 btn_frame,
                 text="🔄 Update Now (Smart)",
-                command=self.dashboard.run_update,
+                command=self.run_update_wrapper,
                 bg=Theme.SECONDARY,
                 fg="white",
                 font=("Arial", 10, "bold"),
@@ -414,7 +414,7 @@ class StatusTab:
             check_btn = tk.Button(
                 btn_frame,
                 text="🔍 Check for Updates",
-                command=lambda: self.dashboard.run_update(dry_run=True),
+                command=lambda: self.run_update_wrapper(dry_run=True),
                 bg=Theme.BG_DARK,
                 fg="white",
                 font=("Arial", 10),
@@ -444,7 +444,7 @@ class StatusTab:
                 local_btn = tk.Button(
                     advanced_frame,
                     text="📁 Force Local Dev",
-                    command=lambda: self.dashboard.run_update(force_source="local"),
+                    command=lambda: self.run_update_wrapper(force_source="local"),
                     bg="#4CAF50",
                     fg="white",
                     font=("Arial", 9),
@@ -459,7 +459,7 @@ class StatusTab:
             remote_btn = tk.Button(
                 advanced_frame,
                 text="🌐 Force Remote GitHub",
-                command=lambda: self.dashboard.run_update(force_source="remote"),
+                command=lambda: self.run_update_wrapper(force_source="remote"),
                 bg="#2196F3",
                 fg="white",
                 font=("Arial", 9),
@@ -495,7 +495,7 @@ class StatusTab:
         log_frame = ttk.LabelFrame(parent_frame, text=" Update Log ", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.dashboard.status_log = scrolledtext.ScrolledText(
+        self.status_log = scrolledtext.ScrolledText(
             log_frame,
             height=10,
             font=("Consolas", 9),
@@ -503,6 +503,26 @@ class StatusTab:
             fg="#D4D4D4",
             insertbackground="white"
         )
-        self.dashboard.status_log.pack(fill=tk.BOTH, expand=True)
-        self.dashboard.status_log.insert("1.0", "System ready. Click 'Update Now' to update from source.\n")
-        self.dashboard.status_log.config(state=tk.DISABLED)
+        self.status_log.pack(fill=tk.BOTH, expand=True)
+        self.status_log.insert("1.0", "System ready. Click 'Update Now' to update from source.\n")
+        self.status_log.config(state=tk.DISABLED)
+
+    def log_status(self, msg, tag=""):
+        """Helper to append to status log"""
+        self.status_log.config(state=tk.NORMAL)
+        self.status_log.insert(tk.END, msg + "\n", tag)
+        self.status_log.see(tk.END)
+        self.status_log.config(state=tk.DISABLED)
+        
+    def clear_log(self):
+        self.status_log.config(state=tk.NORMAL)
+        self.status_log.delete("1.0", tk.END)
+        self.status_log.config(state=tk.DISABLED)
+
+    def run_update_wrapper(self, dry_run=False, force_source=None):
+        self.dashboard.update_service.run_update_process(
+            dry_run=dry_run,
+            force_source=force_source,
+            log_func=self.log_status,
+            clear_log_func=self.clear_log
+        )

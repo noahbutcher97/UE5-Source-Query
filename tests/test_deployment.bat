@@ -31,19 +31,19 @@ echo PASS: Virtual environment found
 REM Test 2: Test imports in deployed environment
 echo.
 echo [TEST 2] Testing imports in deployed environment...
-"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%') / 'src')); from utils.config_manager import ConfigManager; print('PASS: ConfigManager imported')" 2>&1
+"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%'))); from ue5_query.utils.config_manager import ConfigManager; print('PASS: ConfigManager imported')" 2>&1
 if errorlevel 1 (
     echo FAIL: ConfigManager import failed
     exit /b 1
 )
 
-"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%') / 'src')); from utils.source_manager import SourceManager; print('PASS: SourceManager imported')" 2>&1
+"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%'))); from ue5_query.utils.source_manager import SourceManager; print('PASS: SourceManager imported')" 2>&1
 if errorlevel 1 (
     echo FAIL: SourceManager import failed
     exit /b 1
 )
 
-"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%') / 'src')); from core.hybrid_query import HybridQueryEngine; print('PASS: HybridQueryEngine imported')" 2>&1
+"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('%TARGET_SCRIPTS%'))); from ue5_query.core.hybrid_query import HybridQueryEngine; print('PASS: HybridQueryEngine imported')" 2>&1
 if errorlevel 1 (
     echo FAIL: HybridQueryEngine import failed
     exit /b 1
@@ -52,7 +52,7 @@ if errorlevel 1 (
 REM Test 3: Test CLI client
 echo.
 echo [TEST 3] Testing CLI client...
-"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" "%TARGET_SCRIPTS%\src\utils\cli_client.py" --help >nul 2>&1
+"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" "%TARGET_SCRIPTS%\ue5_query\utils\cli_client.py" --help >nul 2>&1
 if errorlevel 1 (
     echo FAIL: CLI client failed to load
     exit /b 1
@@ -63,7 +63,7 @@ REM Test 4: Test simple query
 echo.
 echo [TEST 4] Testing simple query...
 echo Testing: FHitResult --top-k 1
-"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" "%TARGET_SCRIPTS%\src\utils\cli_client.py" FHitResult --top-k 1 --no-server >nul 2>&1
+"%TARGET_SCRIPTS%\.venv\Scripts\python.exe" "%TARGET_SCRIPTS%\ue5_query\utils\cli_client.py" FHitResult --top-k 1 --no-server >nul 2>&1
 if errorlevel 1 (
     echo FAIL: Query execution failed
     exit /b 1

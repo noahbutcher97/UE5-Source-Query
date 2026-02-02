@@ -39,13 +39,9 @@ class TestContextBuilder(unittest.TestCase):
         }
         
         context = small_builder.build_context(results)
-        # Should contain context tag but might skip the entry if it's too big alone
-        # Or checking logic: current_chars + len(entry) > max_chars
-        # Entry length is approx 100+. Max is 50.
-        # So it should result in empty context content.
-        
-        self.assertIn('<context>', context)
-        self.assertNotIn('FLargeStruct', context)
+        # Updated behavior: If entry doesn't fit, we return empty string to save tokens
+        # rather than an empty <context> wrapper.
+        self.assertEqual(context, "")
 
     def test_format_system_prompt(self):
         base = "You are AI."

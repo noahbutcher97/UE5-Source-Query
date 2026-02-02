@@ -99,28 +99,28 @@ class DefinitionExtractor:
             self._content_cache[file_path] = None
             return None
 
-    def extract_struct(self, name: str, fuzzy: bool = False) -> List[DefinitionResult]:
+    def extract_struct(self, name: str, fuzzy: bool = False, allowed_files: Optional[set] = None) -> List[DefinitionResult]:
         """Extract struct definition(s) matching name"""
-        return self._extract_entity(name, 'struct', self.STRUCT_PATTERN, fuzzy)
+        return self._extract_entity(name, 'struct', self.STRUCT_PATTERN, fuzzy, allowed_files=allowed_files)
 
-    def extract_class(self, name: str, fuzzy: bool = False) -> List[DefinitionResult]:
+    def extract_class(self, name: str, fuzzy: bool = False, allowed_files: Optional[set] = None) -> List[DefinitionResult]:
         """Extract class definition(s) matching name"""
-        return self._extract_entity(name, 'class', self.CLASS_PATTERN, fuzzy)
+        return self._extract_entity(name, 'class', self.CLASS_PATTERN, fuzzy, allowed_files=allowed_files)
 
-    def extract_enum(self, name: str, fuzzy: bool = False) -> List[DefinitionResult]:
+    def extract_enum(self, name: str, fuzzy: bool = False, allowed_files: Optional[set] = None) -> List[DefinitionResult]:
         """Extract enum definition(s) matching name"""
-        return self._extract_entity(name, 'enum', self.ENUM_PATTERN, fuzzy)
+        return self._extract_entity(name, 'enum', self.ENUM_PATTERN, fuzzy, allowed_files=allowed_files)
 
-    def extract_function(self, name: str, fuzzy: bool = False) -> List[DefinitionResult]:
+    def extract_function(self, name: str, fuzzy: bool = False, allowed_files: Optional[set] = None) -> List[DefinitionResult]:
         """Extract function definition(s) matching name"""
         results = []
 
         # Try function pattern
-        func_results = self._extract_entity(name, 'function', self.FUNCTION_PATTERN, fuzzy, group_idx=2)
+        func_results = self._extract_entity(name, 'function', self.FUNCTION_PATTERN, fuzzy, group_idx=2, allowed_files=allowed_files)
         results.extend(func_results)
 
         # Also try delegate pattern
-        delegate_results = self._extract_entity(name, 'delegate', self.DELEGATE_PATTERN, fuzzy, group_idx=1)
+        delegate_results = self._extract_entity(name, 'delegate', self.DELEGATE_PATTERN, fuzzy, group_idx=1, allowed_files=allowed_files)
         results.extend(delegate_results)
 
         return results
@@ -131,13 +131,18 @@ class DefinitionExtractor:
         entity_type: str,
         pattern: re.Pattern,
         fuzzy: bool,
-        group_idx: int = -1  # Index of group containing entity name
+        group_idx: int = -1,  # Index of group containing entity name
+        allowed_files: Optional[set] = None
     ) -> List[DefinitionResult]:
         """Generic entity extraction"""
         results = []
         name_lower = name.lower()
 
         for file_path in self.files:
+            # Check if file is in allowed set (scope filtering)
+            if allowed_files is not None and file_path not in allowed_files:
+                continue
+
             try:
                 content = self._read_file(file_path)
                 if content is None:

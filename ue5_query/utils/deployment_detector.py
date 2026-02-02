@@ -28,6 +28,7 @@ class DeploymentInfo:
     last_updated: Optional[str] = None
     is_valid: bool = True
     issues: List[str] = None
+    status: str = "Ready"  # Default to Ready, can be Installing/Indexing
 
     def __post_init__(self):
         if self.issues is None:
@@ -99,7 +100,7 @@ class DeploymentRegistry:
         except Exception as e:
             print(f"[WARN] Failed to save deployment registry: {e}")
 
-    def register_deployment(self, deployment_path: Path):
+    def register_deployment(self, deployment_path: Path, status: str = "Ready"):
         """Register a new deployment"""
         deploy_id = self._get_deployment_id(deployment_path)
 
@@ -112,12 +113,16 @@ class DeploymentRegistry:
             with open(config_file, 'r') as f:
                 config = json.load(f)
 
+            # Read status from config if present, otherwise use passed arg
+            config_status = config.get("deployment_info", {}).get("status", status)
+
             deploy_info = DeploymentInfo(
                 path=str(deployment_path),
                 deployed_from=config.get("deployment_info", {}).get("deployed_from", ""),
                 deployed_at=config.get("deployment_info", {}).get("deployed_at", ""),
                 last_updated=config.get("deployment_info", {}).get("last_updated"),
-                is_valid=True
+                is_valid=True,
+                status=config_status
             )
 
             self.deployments[deploy_id] = deploy_info
@@ -162,10 +167,23 @@ class DeploymentRegistry:
                     deploy.is_valid = False
                     deploy.issues.append("Deployment config missing")
                     continue
+                
+                # Sync status from config file
+                try:
+                    with open(config_file, 'r') as f:
+                        cfg = json.load(f)
+                        # Only update if valid status found
+                        file_status = cfg.get("deployment_info", {}).get("status")
+                        if file_status:
+                            deploy.status = file_status
+                except:
+                    pass
 
-                # Check if core module exists
-                core_module = deploy_path / "src" / "core" / "hybrid_query.py"
-                if not core_module.exists():
+                # Check if core module exists (support both structures)
+                core_module_src = deploy_path / "src" / "core" / "hybrid_query.py"
+                core_module_pkg = deploy_path / "ue5_query" / "core" / "hybrid_query.py"
+                
+                if not core_module_src.exists() and not core_module_pkg.exists():
                     deploy.is_valid = False
                     deploy.issues.append("Core module missing")
 
@@ -243,8 +261,9 @@ class DeploymentDetector:
             if (current / ".ue5query_deploy.json").exists():
                 return current
 
-            # Core module (both environments)
-            if (current / "src" / "core" / "hybrid_query.py").exists():
+            # Core module (both environments - support both src and ue5_query)
+            if (current / "src" / "core" / "hybrid_query.py").exists() or \
+               (current / "ue5_query" / "core" / "hybrid_query.py").exists():
                 return current
 
             # Move up
@@ -277,7 +296,9 @@ class DeploymentDetector:
             return "deployed"
 
         # Ambiguous - try to infer
-        has_core = (self.root / "src" / "core" / "hybrid_query.py").exists()
+        has_src_core = (self.root / "src" / "core" / "hybrid_query.py").exists()
+        has_pkg_core = (self.root / "ue5_query" / "core" / "hybrid_query.py").exists()
+        has_core = has_src_core or has_pkg_core
 
         if has_core:
             # Has core module but unclear which type
@@ -466,13 +487,16 @@ class DeploymentDetector:
             return False
 
         # Required markers
-        required = [
+        # Check for core module in either src or ue5_query
+        has_core = (path / "src" / "core" / "hybrid_query.py").exists() or \
+                   (path / "ue5_query" / "core" / "hybrid_query.py").exists()
+
+        required_files = [
             path / ".git",
-            path / "installer" / "gui_deploy.py",
-            path / "src" / "core" / "hybrid_query.py",
+            path / "installer" / "gui_deploy.py"
         ]
 
-        return all(marker.exists() for marker in required)
+        return has_core and all(marker.exists() for marker in required_files)
 
     def _register_with_dev_repo(self, dev_repo_path: Path):
         """Register current deployment with dev repo registry"""
@@ -577,10 +601,15 @@ class DeploymentDetector:
         """Get list of missing critical components"""
         missing = []
 
+        # Determine expected structure
+        prefix = "src"
+        if (self.root / "ue5_query").exists() and not (self.root / "src").exists():
+            prefix = "ue5_query"
+
         critical = [
-            ("src/core/hybrid_query.py", "Core module"),
-            ("src/core/query_engine.py", "Query engine"),
-            ("src/utils/cli_client.py", "CLI client"),
+            (f"{prefix}/core/hybrid_query.py", "Core module"),
+            (f"{prefix}/core/query_engine.py", "Query engine"),
+            (f"{prefix}/utils/cli_client.py", "CLI client"),
         ]
 
         for path_str, name in critical:

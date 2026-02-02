@@ -1,30 +1,38 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
 REM ====================================================================
-REM UE5 Source Query Tool - Unified Launcher
-REM ====================================================================
-REM Launches the central management dashboard.
+REM UE5 Source Query Tool - Smart Launcher
 REM ====================================================================
 
-set "SCRIPT_DIR=%~dp0"
+cd /d "%~dp0"
 
-REM Check Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python not found. Please install Python 3.8+.
+REM 1. Check for Existing Environment (Fast Path)
+REM If we have a venv (System or Private based), we are good.
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" bootstrap.py %*
+    exit /b !errorlevel!
+)
+
+REM 2. First Run - No Venv found.
+REM We need to decide on a runtime (Private or System).
+echo [INFO] Initializing environment...
+echo Launching Setup Wizard...
+
+powershell -ExecutionPolicy Bypass -File tools\provision.ps1
+
+if !errorlevel! neq 0 (
+    echo [ERROR] Setup cancelled or failed.
     pause
     exit /b 1
 )
 
-REM Check venv (optional but good for running the gui)
-if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
-    set "PYTHON_CMD=%SCRIPT_DIR%.venv\Scripts\python.exe"
+REM 3. Handoff to Bootstrap (using whatever provisioner configured)
+if defined PYTHON_CMD_OVERRIDE (
+    "%PYTHON_CMD_OVERRIDE%" bootstrap.py %*
 ) else (
-    set "PYTHON_CMD=python"
+    REM Fallback to standard python if provisioner chose 'System'
+    python bootstrap.py %*
 )
 
-echo Launching Dashboard...
-"%PYTHON_CMD%" -m ue5_query.management.gui_dashboard
-
-exit /b %errorlevel%
+if !errorlevel! neq 0 pause

@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 
 from ue5_query.utils.file_utils import atomic_write
+from ue5_query.utils.ue_path_utils import UEPathUtils
+from ue5_query.core.engine_definitions import InvalidEngineLayoutError
 
 class ConfigManager:
     """Helper to manage config/.env file"""
@@ -22,6 +24,26 @@ class ConfigManager:
                     key, value = line.split('=', 1)
                     self._config[key.strip()] = value.strip()
 
+        # Systemic Fix: Auto-Heal UE_ENGINE_ROOT using Engine Model
+        engine_root = self._config.get('UE_ENGINE_ROOT')
+        if engine_root:
+            try:
+                # Use the new Engine Model to validate and normalize
+                corrected_path = UEPathUtils.validate_and_normalize(engine_root)
+                
+                # Check if normalization actually changed anything
+                if str(corrected_path) != str(Path(engine_root)):
+                    self._config['UE_ENGINE_ROOT'] = str(corrected_path)
+                    print(f"[ConfigManager] Auto-corrected UE_ENGINE_ROOT to: {corrected_path}")
+                    try:
+                        self.save(self._config)
+                    except Exception as e:
+                        print(f"[ConfigManager] Failed to save auto-correction: {e}")
+            except (FileNotFoundError, InvalidEngineLayoutError):
+                # Path is invalid or missing - leave as is (don't delete user data on load), but warn
+                # print(f"[ConfigManager] Warning: UE_ENGINE_ROOT '{engine_root}' is invalid.")
+                pass
+
     def save(self, config_dict):
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         with atomic_write(self.config_file, 'w') as f:
@@ -35,4 +57,14 @@ class ConfigManager:
         return self._config.get(key, default)
 
     def set(self, key, value):
+        # Input Sanitization: Ensure UE_ENGINE_ROOT is always the internal dir
+        if key == 'UE_ENGINE_ROOT' and value:
+            try:
+                # Use the new Engine Model to validate and normalize
+                path = UEPathUtils.validate_and_normalize(value)
+                value = str(path)
+            except (FileNotFoundError, InvalidEngineLayoutError):
+                # If invalid, we still set it (so user can fix it later), but maybe log/warn?
+                pass 
+
         self._config[key] = value

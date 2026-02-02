@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from ue5_query.indexing.metadata_enricher import MetadataEnricher
 from ue5_query.indexing.processor import EmbeddingProcessor
+from ue5_query.core.constants import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_EMBED_MODEL, DEFAULT_SEMANTIC_CHUNKING
 
 try:
     from tqdm import tqdm
@@ -42,8 +43,7 @@ OUT_META = Path(DEFAULT_OUTPUT_DIR) / "vector_meta.json"
 CACHE_FILE = Path(DEFAULT_OUTPUT_DIR) / "vector_cache.json"
 
 # Model configuration - can be overridden via environment variable
-DEFAULT_MODEL = "microsoft/unixcoder-base"  # Code-trained model (768 dims)
-MODEL_NAME = os.getenv("EMBED_MODEL", DEFAULT_MODEL)
+MODEL_NAME = os.getenv("EMBED_MODEL", DEFAULT_EMBED_MODEL)
 
 # GPU configuration
 USE_GPU = os.getenv("USE_GPU", "auto")  # auto, true, false
@@ -56,9 +56,9 @@ if os.getenv("INDEX_DOCS", "0") == "1":
 MAX_FILE_CHARS = 120_000
 
 # Chunking configuration
-USE_SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "1") == "1"  # Default: ON
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000" if USE_SEMANTIC_CHUNKING else "1500"))
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+USE_SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "1" if DEFAULT_SEMANTIC_CHUNKING else "0") == "1"
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", str(DEFAULT_CHUNK_SIZE) if USE_SEMANTIC_CHUNKING else "1500"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", str(DEFAULT_CHUNK_OVERLAP)))
 
 # Batch size for embedding - smaller batches are more stable on newer GPUs
 # RTX 5090 (SM 120): Use 8-16 to avoid PTX JIT compilation bugs

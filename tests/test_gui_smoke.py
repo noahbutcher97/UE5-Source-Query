@@ -1,9 +1,10 @@
 """
 GUI Smoke Tests
-Basic tests to ensure GUI modules can be imported and initialized.
+Tests to ensure GUI modules can be imported and the Dashboard instantiates without crashing.
 """
 
 import sys
+import tkinter as tk
 from pathlib import Path
 
 # Determine tool root
@@ -15,34 +16,40 @@ def run_tests():
     print("Testing GUI modules...")
 
     try:
-        # Test GUI module imports
+        # 1. Test Imports
+        print("  Testing imports...")
         from ue5_query.utils.gui_theme import Theme
         from ue5_query.management.gui_dashboard import UnifiedDashboard
+        print("  [OK] Imports successful")
 
-        print("  [OK] GUI modules importable")
-
-        # Test Theme class
-        theme_attrs = ['PRIMARY', 'SECONDARY', 'BG_LIGHT', 'BG_DARK', 'TEXT_DARK', 'TEXT_LIGHT']
-        for attr in theme_attrs:
-            if not hasattr(Theme, attr):
-                print(f"  [ERROR] Theme missing attribute: {attr}")
-                return False
-
-        print("  [OK] Theme class has required attributes")
-
-        # Test UnifiedDashboard class
-        dashboard_methods = ['create_layout', 'build_status_tab', 'build_config_tab']
-        for method in dashboard_methods:
-            if not hasattr(UnifiedDashboard, method):
-                print(f"  [ERROR] UnifiedDashboard missing method: {method}")
-                return False
-
-        print("  [OK] UnifiedDashboard class has required methods")
-
+        # 2. Test Instantiation (The Real Smoke Test)
+        print("  Testing Dashboard instantiation...")
+        
+        # Initialize headless root
+        root = tk.Tk()
+        root.withdraw() # Hide window
+        
+        # Create dashboard - this triggers create_layout and all tab builds
+        try:
+            app = UnifiedDashboard(root)
+            # Force update to ensure layout calculation happens
+            root.update_idletasks()
+            print("  [OK] UnifiedDashboard instantiated successfully")
+        except Exception as e:
+            print(f"  [ERROR] Instantiation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            root.destroy()
+            return False
+            
+        # Clean up
+        root.destroy()
         return True
 
     except Exception as e:
         print(f"  [ERROR] GUI smoke test failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":

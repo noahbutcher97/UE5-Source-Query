@@ -2,6 +2,7 @@ import sys
 import subprocess
 import json
 from pathlib import Path
+from ue5_query.utils.ue_path_utils import UEPathUtils
 
 def get_available_engines(script_dir: Path, use_cache: bool = True):
     """
@@ -347,7 +348,13 @@ def get_smart_engine_path(script_dir: Path):
                             import re
                             match = re.search(r'UE[_-]?(\d+\.\d+)', engine_root)
                             if match:
-                                result['path'] = engine_root
+                                # Normalize path (fix Base vs Internal root)
+                                try:
+                                    norm_path = UEPathUtils.validate_and_normalize(engine_root)
+                                    result['path'] = str(norm_path)
+                                except:
+                                    result['path'] = engine_root
+                                
                                 result['version'] = f"UE_{match.group(1)}"
                                 result['source'] = 'config'
                                 return result

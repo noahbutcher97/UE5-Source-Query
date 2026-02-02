@@ -49,8 +49,11 @@ class DeploymentWizard:
         self.source_dir = SCRIPT_DIR
         
         # State
+        # Check environment variable from provisioner
+        pre_detected_gpu = os.environ.get("UE5_QUERY_HAS_GPU", "0") == "1"
+        
         self.target_dir = tk.StringVar(value=str(Path.home() / "Documents" / "UE5-Source-Query"))
-        self.gpu_support = tk.BooleanVar(value=False)
+        self.gpu_support = tk.BooleanVar(value=pre_detected_gpu)
         self.build_index = tk.BooleanVar(value=True)
         self.create_shortcut = tk.BooleanVar(value=True)
         self.update_existing = tk.BooleanVar(value=False)
@@ -75,6 +78,10 @@ class DeploymentWizard:
 
         self.log_queue = queue.Queue()
         self.root.after(100, self.process_log_queue)
+        
+        # Trigger actual detection if env var suggested GPU exists
+        if pre_detected_gpu:
+            self.root.after(800, self.detect_gpu) # Small delay to let UI render first
         
         self.load_default_engine_dirs()
         self.create_layout()
@@ -1370,8 +1377,8 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             target.mkdir(parents=True, exist_ok=True)
             
             # Use simplified copy logic similar to previous script
-            # Copy ue5_query, config, tools, docs
-            for item in ["ue5_query", "config", "tools", "docs", "ask.bat", "launcher.bat", "requirements.txt", ".indexignore", "pyproject.toml"]:
+            # Copy ue5_query, config, tools, docs, tests, installer
+            for item in ["ue5_query", "config", "tools", "docs", "tests", "installer", "ask.bat", "launcher.bat", "bootstrap.py", "requirements.txt", ".indexignore", "pyproject.toml"]:
                 src = self.source_dir / item
                 dst = target / item
                 if not src.exists():
@@ -1493,10 +1500,24 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                         f.write(f"{p}\n")
             
             # 5. Create Venv & Install
-            self.log("Creating Virtual Environment (this takes time)...")
-            subprocess.run([sys.executable, "-m", "venv", str(target / ".venv")])
+            venv_path = target / ".venv"
+            pip = venv_path / "Scripts" / "pip.exe"
             
-            pip = target / ".venv" / "Scripts" / "pip.exe"
+            should_create_venv = True
+            if venv_path.exists() and pip.exists():
+                try:
+                    subprocess.run([str(pip), "--version"], check=True, capture_output=True)
+                    self.log(f"Found existing valid venv at {venv_path}")
+                    should_create_venv = False
+                except:
+                    self.log("Existing venv appears broken, recreating...")
+            
+            if should_create_venv:
+                self.log("Creating Virtual Environment (this takes time)...")
+                subprocess.run([sys.executable, "-m", "venv", str(venv_path)])
+            else:
+                self.log("Skipping venv creation (using existing).")
+            
             self.log("Installing dependencies...")
             subprocess.run([str(pip), "install", "-r", str(target / "requirements.txt")])
 
@@ -1706,6 +1727,21 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             # If git detection fails, use defaults
             pass
 
+        # Load exclusions from centralized config
+        exclude_patterns = [
+            ".venv", ".git", "__pycache__", "*.pyc", "*.pyo", "*.pyd", 
+            ".pytest_cache", ".coverage", "*.log", ".DS_Store", "Thumbs.db"
+        ]
+        
+        try:
+            rules_path = self.source_dir / "config" / "deployment_rules.json"
+            if rules_path.exists():
+                with open(rules_path, 'r') as f:
+                    rules = json.load(f)
+                    exclude_patterns = rules.get("default_excludes", []) + rules.get("deployment_excludes", [])
+        except Exception as e:
+            self.log(f"Warning: Failed to load deployment rules: {e}")
+
         config = {
             "version": self.get_tool_version(),
             "deployment_info": {
@@ -1723,19 +1759,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 "branch": branch
             },
             "update_strategy": "auto",
-            "exclude_patterns": [
-                ".venv/",
-                "data/vector_store.npz",
-                "data/vector_meta*.json",
-                ".git/",
-                "__pycache__/",
-                "*.pyc",
-                "*.pyo",
-                "*.pyd",
-                ".pytest_cache",
-                ".coverage",
-                "*.log"
-            ],
+            "exclude_patterns": exclude_patterns,
             "preserve_local": [
                 "config/user_config.json",
                 ".env",

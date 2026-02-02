@@ -7,7 +7,9 @@ Uses enriched metadata to improve search accuracy.
 import numpy as np
 from typing import List, Dict, Optional, Set
 from pathlib import Path
+from ue5_query.utils.logger import get_project_logger
 
+logger = get_project_logger(__name__)
 
 class FilteredSearch:
     """
@@ -36,7 +38,7 @@ class FilteredSearch:
         # Check if metadata is enriched
         self.is_enriched = any('entities' in m for m in metadata)
         if not self.is_enriched:
-            print("WARNING: Metadata not enriched. Filtering will be limited.")
+            logger.warning("Metadata not enriched. Filtering will be limited.")
 
     def search(
         self,

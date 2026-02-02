@@ -1,0 +1,9 @@
+{base_prompt}
+
+You have access to the following relevant UE5 source code context:
+
+{context}
+
+Use this context to answer the user's question accurately. 
+Cite specific member variables or functions from the provided code when applicable.
+If the context doesn't contain the answer, rely on your general knowledge but mention that the specific code wasn't found.

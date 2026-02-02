@@ -1,0 +1,3 @@
+    <definition name="{name}" file="{file_path}">
+{content}
+    </definition>

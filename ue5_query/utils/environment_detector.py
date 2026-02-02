@@ -26,6 +26,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from enum import Enum
 
+from ue5_query.utils.ue_path_utils import UEPathUtils
+from ue5_query.core.engine_definitions import InvalidEngineLayoutError, EnginePathNormalizer
 
 class DetectionSource(Enum):
     """Source of detection"""
@@ -429,14 +431,23 @@ class ValidationPipeline:
         )
 
     def _check_path_exists(self, install: EngineInstallation) -> CheckResult:
-        """Verify engine root path exists"""
-        if install.engine_root.exists() and install.engine_root.is_dir():
+        """Verify engine root path exists and normalize it"""
+        try:
+            # Use the Engine Model to validate and normalize the path
+            normalized_path = UEPathUtils.validate_and_normalize(str(install.engine_root))
+            
+            # Auto-correction: if normalizer returned a different path (e.g. added /Engine)
+            # update the installation object so subsequent checks look in the right place.
+            if normalized_path != install.engine_root:
+                install.engine_root = normalized_path
+            
             return CheckResult(passed=True, score=1.0)
-        return CheckResult(
-            passed=False,
-            score=0.0,
-            issue=f"Engine path does not exist: {install.engine_root}"
-        )
+        except (FileNotFoundError, InvalidEngineLayoutError) as e:
+            return CheckResult(
+                passed=False,
+                score=0.0,
+                issue=f"Invalid engine path: {e}"
+            )
 
     def _check_directory_structure(self, install: EngineInstallation) -> CheckResult:
         """Verify required directories exist"""

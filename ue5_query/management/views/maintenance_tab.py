@@ -2,16 +2,19 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import sys
 import time
+import threading
 from pathlib import Path
 
 # Try to import Theme, handle missing imports gracefully if run standalone
 try:
     from ue5_query.utils.gui_theme import Theme
+    from ue5_query.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary
 except ImportError:
     # If run standalone or during dev
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
         from ue5_query.utils.gui_theme import Theme
+        from ue5_query.utils.gpu_helper import detect_nvidia_gpu, get_gpu_summary
     except ImportError:
         Theme = None
 
@@ -123,7 +126,7 @@ class MaintenanceTab:
         btn_verify = tk.Button(
             action_grid,
             text="✓ Verify Installation",
-            command=self.dashboard.verify_installation,
+            command=self.verify_installation,
             bg=Theme.SUCCESS,
             fg="white",
             padx=15,
@@ -158,7 +161,7 @@ class MaintenanceTab:
         self.btn_cuda_setup = tk.Button(
             gpu_status_frame,
             text="⚙ Setup CUDA",
-            command=self.dashboard.setup_cuda,
+            command=self.setup_cuda,
             bg="#8E44AD",  # Purple for GPU
             fg="white",
             padx=10,
@@ -170,7 +173,7 @@ class MaintenanceTab:
         self.btn_cuda_setup.pack(side=tk.LEFT, padx=(10, 0))
 
         # Check GPU status after UI is built
-        self.dashboard.root.after(100, self.dashboard.check_gpu_status)
+        self.dashboard.root.after(100, self.check_gpu_status)
 
         # Close button at bottom
         close_frame = tk.Frame(action_frame, bg=Theme.BG_LIGHT)
@@ -232,6 +235,91 @@ class MaintenanceTab:
                 self.lbl_index_status.config(text="Index Status: Error Checking File", foreground=Theme.ERROR)
         else:
             self.lbl_index_status.config(text="Index Status: Not Found", foreground=Theme.ERROR)
+
+    def verify_installation(self):
+        """Run comprehensive installation verification using MaintenanceService"""
+        self.log_maint("Running installation verification...", clear=True)
+        verify_script = self.script_dir / "src" / "utils" / "verify_installation.py"
+        # Adjust path if in installed package structure
+        if not verify_script.exists():
+             # Try alternate location
+             verify_script = self.script_dir / "ue5_query" / "utils" / "verify_installation.py"
+
+        if not verify_script.exists():
+            self.log_maint("[ERROR] Verification script not found")
+            return
+
+        def on_complete(success, message):
+            if success:
+                self.dashboard.root.after(0, lambda: self.log_maint(f"\n[SUCCESS] {message}", append=True))
+            else:
+                self.dashboard.root.after(0, lambda: self.log_maint(f"\n[WARNING] {message}", append=True))
+
+        self.maint_service.run_task(
+            task_name="Installation Verification",
+            command=[sys.executable, str(verify_script)],
+            callback=on_complete,
+            log_callback=lambda line: self.dashboard.root.after(0, lambda: self.log_maint(line.rstrip(), append=True))
+        )
+
+    def check_gpu_status(self):
+        """Check GPU status and update the maintenance tab UI."""
+        def _check():
+            try:
+                gpu_summary = get_gpu_summary()
+
+                # Safety check: Ensure window still exists
+                try:
+                    if not self.dashboard.root.winfo_exists():
+                        return
+                except:
+                    return
+
+                if gpu_summary.get('has_nvidia_gpu'):
+                    gpu_name = gpu_summary.get('gpu_name', 'Unknown GPU')
+                    cuda_installed = gpu_summary.get('cuda_installed')
+                    cuda_compatible = gpu_summary.get('cuda_compatible', False)
+                    
+                    if cuda_installed and cuda_compatible:
+                        status = f"✓ {gpu_name} with CUDA {cuda_installed}"
+                        color = Theme.SUCCESS
+                        enable_setup = False
+                    elif cuda_installed and not cuda_compatible:
+                        status = f"⚠ {gpu_name} - CUDA {cuda_installed} (outdated)"
+                        color = "#FFC107"
+                        enable_setup = True
+                    else:
+                        cuda_required = gpu_summary.get('cuda_required', 'Unknown')
+                        status = f"⚠ {gpu_name} - CUDA {cuda_required}+ required"
+                        color = "#FFC107"
+                        enable_setup = True
+
+                    def update_ui():
+                        self.gpu_status_label.config(text=status, fg=color)
+                        self.btn_cuda_setup.config(state=tk.NORMAL if enable_setup else tk.DISABLED)
+
+                    # Store GPU info on dashboard for shared access if needed
+                    self.dashboard.gpu_info = gpu_summary
+                else:
+                    def update_ui():
+                        self.gpu_status_label.config(text="No NVIDIA GPU detected (CPU mode)", fg="#7F8C8D")
+                        self.btn_cuda_setup.config(state=tk.DISABLED)
+                    self.dashboard.gpu_info = None
+
+                self.dashboard.root.after(0, update_ui)
+
+            except RuntimeError:
+                # Ignore "main thread is not in main loop" if app is closing
+                pass
+            except Exception as e:
+                try:
+                    self.dashboard.root.after(0, lambda: self.gpu_status_label.config(
+                        text=f"Error checking GPU: {e}", fg=Theme.ERROR))
+                    self.dashboard.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.DISABLED))
+                except:
+                    pass
+
+        threading.Thread(target=_check, daemon=True).start()
 
     def rebuild_index(self):
         if not messagebox.askyesno("Confirm", "Rebuild vector index? This may take 5-15 minutes."):
@@ -339,3 +427,80 @@ class MaintenanceTab:
             callback=on_complete,
             log_callback=log_with_progress
         )
+
+    def setup_cuda(self):
+        """Launch CUDA setup wizard (Phase 6)"""
+        # Logic moved from dashboard
+        if not hasattr(self.dashboard, 'gpu_info') or not self.dashboard.gpu_info:
+            messagebox.showerror("Error", "GPU information not available. Please refresh GPU status.")
+            return
+
+        gpu_info = self.dashboard.gpu_info
+        cuda_required = gpu_info.get('cuda_required', 'Unknown')
+        gpu_name = gpu_info.get('gpu_name', 'Unknown GPU')
+        download_url = gpu_info.get('download_url', None)
+
+        if not download_url:
+            messagebox.showerror("Error", "CUDA download URL not available for your GPU.")
+            return
+
+        # Confirm with user
+        response = messagebox.askyesno(
+            "CUDA Setup",
+            f"This will download and install CUDA Toolkit {cuda_required} for your {gpu_name}.\n\n"
+            f"This may take 15-30 minutes and requires administrator privileges.\n\n"
+            f"Continue with CUDA installation?"
+        )
+
+        if not response:
+            return
+
+        # Log to maintenance tab
+        self.log_maint(f"Starting CUDA {cuda_required} setup for {gpu_name}...", clear=True)
+        self.btn_cuda_setup.config(state=tk.DISABLED)
+        
+        # Update progress display
+        self.maint_progress['value'] = 0
+        self.maint_progress_label.config(text="Downloading CUDA Toolkit...")
+        self.maint_time_label.config(text="This may take 15-30 minutes...")
+        
+        def _setup():
+            try:
+                def download_callback(downloaded, total):
+                    if total > 0:
+                        percent = (downloaded / total) * 50
+                        self.dashboard.root.after(0, lambda p=percent: self.maint_progress.config(value=p))
+                        size_mb = downloaded / (1024 * 1024)
+                        total_mb = total / (1024 * 1024)
+                        self.dashboard.root.after(0, lambda d=size_mb, t=total_mb: 
+                            self.maint_progress_label.config(text=f"Downloading: {d:.1f} / {t:.1f} MB"))
+
+                def install_callback(message):
+                    self.dashboard.root.after(0, lambda m=message: self.log_maint(m, append=True))
+                    if "Installing" in message:
+                        self.dashboard.root.after(0, lambda: self.maint_progress.config(value=60))
+
+                # Import installer
+                from ue5_query.utils.cuda_installer import install_cuda_with_progress
+                
+                success = install_cuda_with_progress(
+                    download_url, 
+                    self.script_dir / "temp", 
+                    download_callback,
+                    install_callback
+                )
+
+                if success:
+                    self.dashboard.root.after(0, lambda: self.log_maint("\n[SUCCESS] CUDA installation completed!", append=True))
+                    self.dashboard.root.after(0, lambda: messagebox.showinfo("Success", "CUDA Toolkit installed successfully.\nPlease restart the application."))
+                else:
+                    self.dashboard.root.after(0, lambda: self.log_maint("\n[FAILED] CUDA installation failed.", append=True))
+                    self.dashboard.root.after(0, lambda: messagebox.showerror("Error", "CUDA installation failed. Check log for details."))
+
+            except Exception as e:
+                self.dashboard.root.after(0, lambda: self.log_maint(f"\n[ERROR] {e}", append=True))
+            finally:
+                self.dashboard.root.after(0, lambda: self.btn_cuda_setup.config(state=tk.NORMAL))
+                self.dashboard.root.after(0, self.check_gpu_status)
+
+        threading.Thread(target=_setup, daemon=True).start()

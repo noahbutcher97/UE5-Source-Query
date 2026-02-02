@@ -31,7 +31,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-# Default exclusion patterns (never copy these)
+# Default exclusion patterns (Fallback if config missing)
 DEFAULT_EXCLUDES = [
     ".venv",
     ".git",
@@ -46,32 +46,32 @@ DEFAULT_EXCLUDES = [
     "Thumbs.db"
 ]
 
-# Deployment exclusion patterns (dev-only files that should not ship to deployments)
+# Deployment exclusion patterns (Fallback)
 DEPLOYMENT_EXCLUDES = [
-    # Research/debug tools
     "src/research",
     "src/research/**",
-
-    # Dev-only documentation
     "docs/Development",
     "docs/Development/**",
     "docs/_archive",
     "docs/_archive/**",
-
-    # Deprecated code
     "src/indexing/BuildSourceIndex.ps1",
     "src/indexing/BuildSourceIndexAdmin.bat",
-
-    # Dev test artifacts
     "tests/DEPLOYMENT_TEST_RESULTS.md",
-
-    # Dev collaboration tools
     "tools/setup-git-lfs.bat",
-
-    # Dev-only AI guides
     "CLAUDE.md",
     "GEMINI.md",
 ]
+
+# Load rules from centralized config
+try:
+    config_path = Path(__file__).parent.parent / "config" / "deployment_rules.json"
+    if config_path.exists():
+        with open(config_path, "r") as f:
+            rules = json.load(f)
+            DEFAULT_EXCLUDES = rules.get("default_excludes", DEFAULT_EXCLUDES)
+            DEPLOYMENT_EXCLUDES = rules.get("deployment_excludes", DEPLOYMENT_EXCLUDES)
+except Exception as e:
+    print(f"[WARN] Failed to load deployment rules: {e}")
 
 def clean_dev_files(deployment_root: Path):
     """Remove dev-only files from existing deployment."""
@@ -239,27 +239,31 @@ def is_deployed_repo(root: Path) -> bool:
 class UpdateManager:
     """Manages updates for deployed UE5 Source Query installations"""
 
-    def __init__(self, deployment_root: Path):
+    def __init__(self, deployment_root: Path, logger=None):
         self.deployment_root = deployment_root
         self.config_file = deployment_root / ".ue5query_deploy.json"
         self.config: Optional[Dict[str, Any]] = None
         self.backup_dir: Optional[Path] = None
+        self.logger = logger if logger else print
+
+    def log(self, msg):
+        self.logger(msg)
 
     def load_config(self) -> bool:
         """Load deployment configuration"""
         if not self.config_file.exists():
-            print(f"[ERROR] Deployment config not found: {self.config_file}")
-            print("This doesn't appear to be a deployed installation.")
-            print("Run the GUI installer to deploy first.")
+            self.log(f"[ERROR] Deployment config not found: {self.config_file}")
+            self.log("This doesn't appear to be a deployed installation.")
+            self.log("Run the GUI installer to deploy first.")
             return False
 
         try:
             with open(self.config_file, 'r') as f:
                 self.config = json.load(f)
-            print(f"[OK] Loaded deployment config")
+            self.log(f"[OK] Loaded deployment config")
             return True
         except json.JSONDecodeError as e:
-            print(f"[ERROR] Failed to parse config: {e}")
+            self.log(f"[ERROR] Failed to parse config: {e}")
             return False
 
     def detect_update_source(self, force_source: Optional[str] = None) -> Optional[str]:
@@ -274,9 +278,9 @@ class UpdateManager:
         """
         if force_source:
             if force_source not in ['local', 'remote']:
-                print(f"[ERROR] Invalid source: {force_source}. Use 'local' or 'remote'.")
+                self.log(f"[ERROR] Invalid source: {force_source}. Use 'local' or 'remote'.")
                 return None
-            print(f"[CONFIG] Forcing update source: {force_source}")
+            self.log(f"[CONFIG] Forcing update source: {force_source}")
             return force_source
 
         # Try local dev repo first
@@ -284,19 +288,19 @@ class UpdateManager:
         if local_repo:
             local_path = Path(local_repo)
             if self._is_valid_dev_repo(local_path):
-                print(f"[OK] Found local dev repo: {local_path}")
+                self.log(f"[OK] Found local dev repo: {local_path}")
                 return 'local'
             else:
-                print(f"[WARN]  Local dev repo not valid: {local_path}")
+                self.log(f"[WARN]  Local dev repo not valid: {local_path}")
 
         # Fall back to remote
         remote_repo = self.config.get("update_sources", {}).get("remote_repo")
         if remote_repo:
-            print(f"[REMOTE] Using remote repo: {remote_repo}")
+            self.log(f"[REMOTE] Using remote repo: {remote_repo}")
             return 'remote'
 
-        print("[ERROR] No update source available!")
-        print("Configure local_dev_repo or remote_repo in .ue5query_deploy.json")
+        self.log("[ERROR] No update source available!")
+        self.log("Configure local_dev_repo or remote_repo in .ue5query_deploy.json")
         return None
 
     def _is_valid_dev_repo(self, path: Path) -> bool:
@@ -305,12 +309,14 @@ class UpdateManager:
             return False
 
         # Check for key files
-        required = [
-            path / "src" / "core" / "hybrid_query.py",
+        has_core = (path / "src" / "core" / "hybrid_query.py").exists() or \
+                   (path / "ue5_query" / "core" / "hybrid_query.py").exists()
+        
+        required_files = [
             path / "installer" / "gui_deploy.py",
             path / "README.md"
         ]
-        return all(f.exists() for f in required)
+        return has_core and all(f.exists() for f in required_files)
 
     def create_backup(self) -> bool:
         """Create backup before update"""
@@ -320,13 +326,13 @@ class UpdateManager:
         unique_id = str(uuid.uuid4())[:8]
         self.backup_dir = self.deployment_root / "backups" / f"backup_{timestamp}_{unique_id}"
 
-        print(f"[BACKUP] Creating backup: {self.backup_dir}")
+        self.log(f"[BACKUP] Creating backup: {self.backup_dir}")
 
         try:
             self.backup_dir.mkdir(parents=True, exist_ok=False)
 
             # Backup critical directories
-            for dir_name in ["src", "installer", "tools", "tests"]:
+            for dir_name in ["ue5_query", "src", "installer", "tools", "tests"]:
                 src_dir = self.deployment_root / dir_name
                 if src_dir.exists():
                     shutil.copytree(src_dir, self.backup_dir / dir_name)
@@ -335,36 +341,36 @@ class UpdateManager:
             if self.config_file.exists():
                 shutil.copy2(self.config_file, self.backup_dir / ".ue5query_deploy.json")
 
-            print(f"[OK] Backup created successfully")
+            self.log(f"[OK] Backup created successfully")
             return True
 
         except Exception as e:
-            print(f"[ERROR] Backup failed: {e}")
+            self.log(f"[ERROR] Backup failed: {e}")
             return False
 
     def update_from_local(self, dry_run: bool = False) -> bool:
         """Update from local dev repo"""
         local_repo = Path(self.config["update_sources"]["local_dev_repo"])
-        print(f"\n[UPDATE] Updating from local dev repo: {local_repo}")
+        self.log(f"\n[UPDATE] Updating from local dev repo: {local_repo}")
 
         if not self._is_valid_dev_repo(local_repo):
-            print(f"[ERROR] Invalid dev repo: {local_repo}")
+            self.log(f"[ERROR] Invalid dev repo: {local_repo}")
             return False
 
         # Clean dev-only files from deployment before updating
         clean_dev_files(self.deployment_root)
 
         # Directories to sync
-        sync_dirs = ["src", "installer", "tools", "tests", "docs", "examples"]
+        sync_dirs = ["ue5_query", "src", "installer", "tools", "tests", "docs", "examples"]
 
         exclude_patterns = DEFAULT_EXCLUDES + DEPLOYMENT_EXCLUDES + self.config.get("exclude_patterns", [])
 
         if dry_run:
-            print("\n[CHECK] DRY RUN - Would update:")
+            self.log("\n[CHECK] DRY RUN - Would update:")
             for dir_name in sync_dirs:
                 src = local_repo / dir_name
                 if src.exists():
-                    print(f"  - {dir_name}/")
+                    self.log(f"  - {dir_name}/")
             return True
 
         # Create backup
@@ -378,10 +384,10 @@ class UpdateManager:
                 dst_dir = self.deployment_root / dir_name
 
                 if not src_dir.exists():
-                    print(f"[WARN]  Skipping {dir_name}/ (not found in source)")
+                    self.log(f"[WARN]  Skipping {dir_name}/ (not found in source)")
                     continue
 
-                print(f"[DIR] Syncing {dir_name}/...")
+                self.log(f"[DIR] Syncing {dir_name}/...")
 
                 # Remove existing directory (except preserved files)
                 if dst_dir.exists():
@@ -410,12 +416,12 @@ class UpdateManager:
                 )
 
             # Copy root files
-            for file_name in ["README.md", "requirements.txt", "ask.bat", "launcher.bat", "Setup.bat"]:
+            for file_name in ["README.md", "requirements.txt", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
                 src_file = local_repo / file_name
                 dst_file = self.deployment_root / file_name
                 if src_file.exists():
                     shutil.copy2(src_file, dst_file)
-                    print(f"[FILE] Updated {file_name}")
+                    self.log(f"[FILE] Updated {file_name}")
 
             # Restore preserved files from backup
             self._restore_preserved_files()
@@ -424,7 +430,7 @@ class UpdateManager:
             self._update_deployment_info("local", local_repo)
 
             # Clear Python cache to ensure new code loads
-            print()
+            self.log("")
             clear_python_cache(self.deployment_root)
 
             # Run post-update tasks (e.g. package installation)
@@ -435,16 +441,16 @@ class UpdateManager:
             try:
                 from datetime import datetime
                 marker_file.write_text(f"Updated at {datetime.now().isoformat()}")
-                print("[NOTIFY] Created restart marker for running GUIs")
+                self.log("[NOTIFY] Created restart marker for running GUIs")
             except Exception as e:
-                print(f"[WARN] Could not create restart marker: {e}")
+                self.log(f"[WARN] Could not create restart marker: {e}")
 
-            print("\n[OK] Local update completed successfully!")
+            self.log("\n[OK] Local update completed successfully!")
             return True
 
         except Exception as e:
-            print(f"\n[ERROR] Update failed: {e}")
-            print("Attempting rollback...")
+            self.log(f"\n[ERROR] Update failed: {e}")
+            self.log("Attempting rollback...")
             self._rollback()
             return False
 
@@ -453,11 +459,11 @@ class UpdateManager:
         remote_repo = self.config["update_sources"]["remote_repo"]
         branch = self.config["update_sources"].get("branch", "master")
 
-        print(f"\n[REMOTE] Updating from remote repo: {remote_repo}")
-        print(f"Branch: {branch}")
+        self.log(f"\n[REMOTE] Updating from remote repo: {remote_repo}")
+        self.log(f"Branch: {branch}")
 
         if dry_run:
-            print("\n[CHECK] DRY RUN - Would fetch from remote")
+            self.log("\n[CHECK] DRY RUN - Would fetch from remote")
             return True
 
         # Create temporary directory for git clone
@@ -469,7 +475,7 @@ class UpdateManager:
 
         try:
             # Always clone fresh for reliability
-            print("[DOWNLOAD] Cloning repository...")
+            self.log("[DOWNLOAD] Cloning repository...")
             subprocess.run(
                 ["git", "clone", "-b", branch, remote_repo, str(temp_dir)],
                 check=True,
@@ -484,10 +490,10 @@ class UpdateManager:
                 return False
 
             # Copy files from temp to deployment
-            print("[UPDATE] Installing update...")
+            self.log("[UPDATE] Installing update...")
             exclude_patterns = DEFAULT_EXCLUDES + DEPLOYMENT_EXCLUDES + self.config.get("exclude_patterns", [])
 
-            for dir_name in ["src", "installer", "tools", "tests", "docs", "examples"]:
+            for dir_name in ["ue5_query", "src", "installer", "tools", "tests", "docs", "examples"]:
                 src_dir = temp_dir / dir_name
                 dst_dir = self.deployment_root / dir_name
 
@@ -515,7 +521,7 @@ class UpdateManager:
                         dst_dir,
                         ignore=shutil.ignore_patterns(*dir_specific_patterns) if dir_specific_patterns else None
                     )
-                    print(f"[OK] Updated {dir_name}/")
+                    self.log(f"[OK] Updated {dir_name}/")
 
             # Restore preserved files
             self._restore_preserved_files()
@@ -524,7 +530,7 @@ class UpdateManager:
             self._update_deployment_info("remote", remote_repo)
 
             # Clear Python cache to ensure new code loads
-            print()
+            self.log("")
             clear_python_cache(self.deployment_root)
 
             # Run post-update tasks (e.g. package installation)
@@ -535,22 +541,22 @@ class UpdateManager:
             try:
                 from datetime import datetime
                 marker_file.write_text(f"Updated at {datetime.now().isoformat()}")
-                print("[NOTIFY] Created restart marker for running GUIs")
+                self.log("[NOTIFY] Created restart marker for running GUIs")
             except Exception as e:
-                print(f"[WARN] Could not create restart marker: {e}")
+                self.log(f"[WARN] Could not create restart marker: {e}")
 
             # Cleanup temp directory
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-            print("\n[OK] Remote update completed successfully!")
+            self.log("\n[OK] Remote update completed successfully!")
             return True
 
         except subprocess.CalledProcessError as e:
-            print(f"\n[ERROR] Git command failed: {e}")
-            print(e.stderr.decode() if e.stderr else "")
+            self.log(f"\n[ERROR] Git command failed: {e}")
+            self.log(e.stderr.decode() if e.stderr else "")
             return False
         except Exception as e:
-            print(f"\n[ERROR] Update failed: {e}")
+            self.log(f"\n[ERROR] Update failed: {e}")
             self._rollback()
             return False
         finally:
@@ -582,13 +588,13 @@ class UpdateManager:
             if backup_file.exists():
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup_file, dest_file)
-                print(f"[PRESERVE] Restored preserved file: {file_path}")
+                self.log(f"[PRESERVE] Restored preserved file: {file_path}")
 
     def _post_update_tasks(self):
         """Run post-update maintenance tasks (e.g., package installation)"""
         pyproject = self.deployment_root / "pyproject.toml"
         if pyproject.exists():
-            print("\n[SETUP] Updating package installation...")
+            self.log("\n[SETUP] Updating package installation...")
             try:
                 # Determine python executable to use (venv or system)
                 # Look for venv first
@@ -605,12 +611,12 @@ class UpdateManager:
                     check=True,
                     capture_output=True
                 )
-                print("[OK] Package installed in editable mode")
+                self.log("[OK] Package installed in editable mode")
             except subprocess.CalledProcessError as e:
-                print(f"[WARN] Failed to install package: {e}")
-                print("       (The tool will still work via compatibility imports)")
+                self.log(f"[WARN] Failed to install package: {e}")
+                self.log("       (The tool will still work via compatibility imports)")
             except Exception as e:
-                print(f"[WARN] Error during post-update setup: {e}")
+                self.log(f"[WARN] Error during post-update setup: {e}")
 
     def _update_deployment_info(self, source: str, source_path):
         """Update deployment info in config"""
@@ -627,13 +633,13 @@ class UpdateManager:
     def _rollback(self) -> bool:
         """Rollback to backup on failure"""
         if not self.backup_dir or not self.backup_dir.exists():
-            print("[ERROR] No backup available for rollback!")
+            self.log("[ERROR] No backup available for rollback!")
             return False
 
         try:
-            print(f"[ROLLBACK]  Rolling back from: {self.backup_dir}")
+            self.log(f"[ROLLBACK]  Rolling back from: {self.backup_dir}")
 
-            for dir_name in ["src", "installer", "tools", "tests", "examples"]:
+            for dir_name in ["ue5_query", "src", "installer", "tools", "tests", "examples"]:
                 backup_src = self.backup_dir / dir_name
                 if backup_src.exists():
                     dest = self.deployment_root / dir_name
@@ -641,11 +647,11 @@ class UpdateManager:
                         shutil.rmtree(dest)
                     shutil.copytree(backup_src, dest)
 
-            print("[OK] Rollback successful")
+            self.log("[OK] Rollback successful")
             return True
 
         except Exception as e:
-            print(f"[ERROR] Rollback failed: {e}")
+            self.log(f"[ERROR] Rollback failed: {e}")
             return False
 
     def check_for_updates(self, source: str) -> Optional[Dict[str, Any]]:
@@ -692,33 +698,34 @@ class UpdateManager:
             True if successful
         """
         if not is_deployed_repo(target_path):
-            print(f"[ERROR] {target_path} is not a deployed installation")
+            self.log(f"[ERROR] {target_path} is not a deployed installation")
             return False
 
         # Get versions
         source_version = get_version(Path.cwd())
         target_version = get_version(target_path)
 
-        print(f"\n[PUSH] {target_path}")
-        print(f"  Source: {source_version or 'unknown'}")
-        print(f"  Target: {target_version or 'unknown'}")
+        self.log(f"\n[PUSH] {target_path}")
+        self.log(f"  Source: {source_version or 'unknown'}")
+        self.log(f"  Target: {target_version or 'unknown'}")
 
         if source_version and target_version and not force:
             comparison = compare_versions(source_version, target_version)
             if comparison == 0:
-                print(f"  [SKIP] Already up-to-date (use --force for incremental push)")
+                self.log(f"  [SKIP] Already up-to-date (use --force for incremental push)")
                 return True
             elif comparison < 0:
-                print(f"  [WARN] Target is newer than source!")
+                self.log(f"  [WARN] Target is newer than source!")
         elif force and source_version == target_version:
-            print(f"  [FORCE] Incremental push (same version)")
+            self.log(f"  [FORCE] Incremental push (same version)")
 
         if dry_run:
-            print(f"  [DRY-RUN] Would update files")
+            self.log(f"  [DRY-RUN] Would update files")
             return True
 
         # Create temporary UpdateManager for this deployment
-        temp_manager = UpdateManager(target_path)
+        # Pass the same logger to the temporary manager
+        temp_manager = UpdateManager(target_path, logger=self.logger)
         if not temp_manager.load_config():
             return False
 
@@ -740,23 +747,23 @@ class UpdateManager:
         registry_file = dev_root / ".deployments_registry.json"
 
         if not registry_file.exists():
-            print("[ERROR] No deployments registry found")
-            print("This doesn't appear to be a dev repo.")
+            self.log("[ERROR] No deployments registry found")
+            self.log("This doesn't appear to be a dev repo.")
             return 0
 
         try:
             with open(registry_file, 'r') as f:
                 registry = json.load(f)
         except Exception as e:
-            print(f"[ERROR] Failed to read registry: {e}")
+            self.log(f"[ERROR] Failed to read registry: {e}")
             return 0
 
         deployments_dict = registry.get('deployments', {})
         if not deployments_dict:
-            print("[INFO] No deployments tracked")
+            self.log("[INFO] No deployments tracked")
             return 0
 
-        print(f"\n[PUSH-ALL] Updating {len(deployments_dict)} deployment(s)\n")
+        self.log(f"\n[PUSH-ALL] Updating {len(deployments_dict)} deployment(s)\n")
 
         success_count = 0
         for deploy_id, deploy_info in deployments_dict.items():
@@ -765,28 +772,33 @@ class UpdateManager:
                 if self.push_to_deployment(deploy_path, dry_run, force):
                     success_count += 1
             else:
-                print(f"[WARN] Deployment not found: {deploy_path}")
+                self.log(f"[WARN] Deployment not found: {deploy_path}")
 
-        print(f"\n[SUMMARY] Updated {success_count}/{len(deployments_dict)} deployments")
+        self.log(f"\n[SUMMARY] Updated {success_count}/{len(deployments_dict)} deployments")
         return success_count
 
     def verify_installation(self) -> bool:
         """Verify installation after update"""
-        print("\n[CHECK] Verifying installation...")
+        self.log("\n[CHECK] Verifying installation...")
+
+        # Support both new and old structure
+        prefix = "ue5_query"
+        if (self.deployment_root / "src").exists() and not (self.deployment_root / "ue5_query").exists():
+            prefix = "src"
 
         checks = [
-            ("Core module", self.deployment_root / "src" / "core" / "hybrid_query.py"),
-            ("Query engine", self.deployment_root / "src" / "core" / "query_engine.py"),
-            ("CLI client", self.deployment_root / "src" / "utils" / "cli_client.py"),
+            ("Core module", self.deployment_root / prefix / "core" / "hybrid_query.py"),
+            ("Query engine", self.deployment_root / prefix / "core" / "query_engine.py"),
+            ("CLI client", self.deployment_root / prefix / "utils" / "cli_client.py"),
             ("Config file", self.config_file),
         ]
 
         all_ok = True
         for name, path in checks:
             if path.exists():
-                print(f"  [OK] {name}")
+                self.log(f"  [OK] {name}")
             else:
-                print(f"  [ERROR] {name} - MISSING!")
+                self.log(f"  [ERROR] {name} - MISSING!")
                 all_ok = False
 
         return all_ok

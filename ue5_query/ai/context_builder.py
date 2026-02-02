@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 import json
+from pathlib import Path
 
 class ContextBuilder:
     """
@@ -7,8 +8,39 @@ class ContextBuilder:
     Formats code snippets and definitions for LLM consumption.
     """
     
-    def __init__(self, max_chars: int = 100000):
+    def __init__(self, max_chars: int = 100000, prompt_dir: Path = None):
         self.max_chars = max_chars
+        
+        # Default to project_root/data/prompts if not provided
+        if prompt_dir is None:
+            # Assumes ue5_query/ai/context_builder.py -> project_root is 2 levels up (ue5_query/ai/../../)
+            self.prompt_dir = Path(__file__).resolve().parents[2] / "data" / "prompts"
+        else:
+            self.prompt_dir = prompt_dir
+            
+        self.templates = self._load_templates()
+
+    def _load_templates(self) -> Dict[str, str]:
+        """Load templates from disk or fallback to defaults"""
+        templates = {}
+        # Define defaults in case files are missing (Safety fallback)
+        defaults = {
+            "rag_definition_entry.txt": '    <definition name="{name}" file="{file_path}">\n{content}\n    </definition>',
+            "rag_context_wrapper.txt": '<context>\n{entries}\n</context>',
+            "system_prompt_template.txt": '{base_prompt}\n\nYou have access to the following relevant UE5 source code context:\n\n{context}\n\nUse this context to answer the user\'s question accurately.'
+        }
+        
+        for name, default_content in defaults.items():
+            if self.prompt_dir:
+                path = self.prompt_dir / name
+                if path.exists():
+                    try:
+                        templates[name] = path.read_text(encoding='utf-8')
+                        continue
+                    except Exception:
+                        pass
+            templates[name] = default_content
+        return templates
 
     def build_context(self, search_results: Dict[str, Any]) -> str:
         """
@@ -27,8 +59,8 @@ class ContextBuilder:
         if not search_results:
             return ""
 
-        parts = ["<context>"]
-        current_chars = len(parts[0])
+        entries = []
+        current_chars = 0
         
         # 1. Add Definitions (High Priority)
         definitions = search_results.get('definition_results', [])
@@ -41,42 +73,32 @@ class ContextBuilder:
             if not content:
                 continue
                 
-            entry = f"""
-    <definition name="{name}" file="{file_path}">
-{content}
-    </definition>"""
+            entry = self.templates["rag_definition_entry.txt"].format(
+                name=name,
+                file_path=file_path,
+                content=content
+            )
             
             if current_chars + len(entry) > self.max_chars:
                 break
                 
-            parts.append(entry)
+            entries.append(entry)
             current_chars += len(entry)
 
         # 2. Add Semantic Hits (Medium Priority)
-        # We need to fetch the actual text content if it's not in the result
-        # The HybridQueryEngine results often just have 'path' and 'chunk_index'
-        # We assume the caller might have hydrated them, or we accept what we have.
-        # For now, let's assume we rely on definitions mostly, or snippets if provided.
+        # (Same logic as before - skipping for now as per original code)
         
-        # Note: In the current architecture, semantic results from query() don't return full text 
-        # unless we explicitly ask for it or re-read it. 
-        # Ideally, the AssistantView should hydrate this before calling build_context, 
-        # or we accept that we mainly feed definitions for now.
-        
-        parts.append("</context>")
-        return "\n".join(parts)
+        if not entries:
+            return ""
+            
+        return self.templates["rag_context_wrapper.txt"].format(entries="\n".join(entries))
 
     def format_system_prompt(self, base_prompt: str, context: str) -> str:
         """Combine base instruction with context"""
         if not context:
             return base_prompt
             
-        return f"""{base_prompt}
-
-You have access to the following relevant UE5 source code context:
-
-{context}
-
-Use this context to answer the user's question accurately. 
-Cite specific member variables or functions from the provided code when applicable.
-If the context doesn't contain the answer, rely on your general knowledge but mention that the specific code wasn't found."""
+        return self.templates["system_prompt_template.txt"].format(
+            base_prompt=base_prompt,
+            context=context
+        )

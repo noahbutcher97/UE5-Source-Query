@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ue5_query.utils.file_utils import atomic_write
+from ue5_query.utils.ue_path_utils import UEPathUtils
 
 class SourceManager:
     """Helper to manage EngineDirs.txt and ProjectDirs.txt"""
@@ -26,12 +27,37 @@ class SourceManager:
             return [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
     def add_engine_dir(self, path):
+        """
+        Add engine directory with intelligent subsumption.
+        Returns: (success, message)
+        """
         current = self.get_engine_dirs()
-        if str(path) not in current:
-            current.append(str(path))
-            self._save_engine_dirs(current)
-            return True
-        return False
+        path_str = str(path)
+        
+        # 1. Check if exact duplicate
+        if path_str in current:
+            return False, "Path already exists."
+
+        # 2. Add and Optimize
+        candidate_list = current + [path_str]
+        optimized = UEPathUtils.optimize_path_list(candidate_list)
+        
+        # 3. Analyze changes for feedback
+        if path_str not in optimized:
+            # The new path was redundant (a parent already exists)
+            # Find which parent covers it
+            parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), "a parent folder")
+            return False, f"Skipped: Covered by '{parent}'."
+        
+        # If we are here, the new path was added.
+        # Check if any OLD paths were removed (subsumed)
+        removed_count = len(current) - (len(optimized) - 1)
+        
+        self._save_engine_dirs(optimized)
+        
+        if removed_count > 0:
+            return True, f"Added path and removed {removed_count} redundant child entries."
+        return True, "Path added successfully."
 
     def remove_engine_dir(self, path):
         current = self.get_engine_dirs()
@@ -59,12 +85,29 @@ class SourceManager:
             return [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
     def add_project_dir(self, path):
+        """
+        Add project directory with intelligent subsumption.
+        Returns: (success, message)
+        """
         current = self.get_project_dirs()
-        if str(path) not in current:
-            current.append(str(path))
-            self._save_project_dirs(current)
-            return True
-        return False
+        path_str = str(path)
+        
+        if path_str in current:
+            return False, "Path already exists."
+
+        candidate_list = current + [path_str]
+        optimized = UEPathUtils.optimize_path_list(candidate_list)
+        
+        if path_str not in optimized:
+            parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), "a parent folder")
+            return False, f"Skipped: Covered by '{parent}'."
+        
+        removed_count = len(current) - (len(optimized) - 1)
+        self._save_project_dirs(optimized)
+        
+        if removed_count > 0:
+            return True, f"Added path and removed {removed_count} redundant child entries."
+        return True, "Path added successfully."
 
     def remove_project_dir(self, path):
         current = self.get_project_dirs()

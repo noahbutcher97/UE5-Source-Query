@@ -1,0 +1,29 @@
+{
+  "default_excludes": [
+    ".venv",
+    ".git",
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".pytest_cache",
+    ".coverage",
+    "*.log",
+    ".DS_Store",
+    "Thumbs.db"
+  ],
+  "deployment_excludes": [
+    "src/research",
+    "src/research/**",
+    "docs/Development",
+    "docs/Development/**",
+    "docs/_archive",
+    "docs/_archive/**",
+    "src/indexing/BuildSourceIndex.ps1",
+    "src/indexing/BuildSourceIndexAdmin.bat",
+    "tests/DEPLOYMENT_TEST_RESULTS.md",
+    "tools/setup-git-lfs.bat",
+    "CLAUDE.md",
+    "GEMINI.md"
+  ]
+}
