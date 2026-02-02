@@ -148,8 +148,7 @@ class SourceManagerTab:
                  start_dir = engine_root
 
         def _on_add(paths):
-            count = 0
-            messages = []
+            processed_paths = []
             for p in paths:
                 path_obj = Path(p)
                 path_str = str(path_obj)
@@ -162,12 +161,9 @@ class SourceManagerTab:
                         path_str = str(Path("{ENGINE_ROOT}") / rel_path)
                     except ValueError:
                         pass
-                
-                success, msg = self.source_manager.add_engine_dir(path_str)
-                if success:
-                    count += 1
-                if msg != "Path added successfully.":
-                    messages.append(f"{Path(p).name}: {msg}")
+                processed_paths.append(path_str)
+
+            count, messages = self.source_manager.add_engine_dirs(processed_paths)
 
             self.refresh_engine_list()
             
@@ -230,14 +226,7 @@ class SourceManagerTab:
     def add_batch_folders(self):
         """Open batch selection dialog"""
         def _on_add(paths):
-            count = 0
-            messages = []
-            for p in paths:
-                success, msg = self.source_manager.add_project_dir(p)
-                if success:
-                    count += 1
-                if msg != "Path added successfully.":
-                    messages.append(f"{Path(p).name}: {msg}")
+            count, messages = self.source_manager.add_project_dirs(paths)
                     
             self.refresh_project_list()
             summary = f"Processed {len(paths)} paths.\nAdded: {count}"

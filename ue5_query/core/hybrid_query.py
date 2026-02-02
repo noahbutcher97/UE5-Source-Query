@@ -340,21 +340,23 @@ class HybridQueryEngine:
         # Filter files by scope for definition extraction using pre-computed cache
         # Fallback to 'all' if scope not found (safety)
         allowed_files = self._scope_cache.get(scope, self._scope_cache['all'])
+
+        # Re-instantiate to ensure fresh content reads
+        scoped_extractor = DefinitionExtractor(list(allowed_files))
         
         all_results = []
         
         # Search for each entity term
         for entity_name, entity_type in entities_to_search:
             # Route to appropriate extractor with fuzzy matching enabled
-            # Reuses the persistent self.definition_extractor instead of re-instantiating
             if entity_type == EntityType.STRUCT:
-                all_results.extend(self.definition_extractor.extract_struct(entity_name, fuzzy=True, allowed_files=allowed_files))
+                all_results.extend(scoped_extractor.extract_struct(entity_name, fuzzy=True))
             elif entity_type == EntityType.CLASS:
-                all_results.extend(self.definition_extractor.extract_class(entity_name, fuzzy=True, allowed_files=allowed_files))
+                all_results.extend(scoped_extractor.extract_class(entity_name, fuzzy=True))
             elif entity_type == EntityType.ENUM:
-                all_results.extend(self.definition_extractor.extract_enum(entity_name, fuzzy=True, allowed_files=allowed_files))
+                all_results.extend(scoped_extractor.extract_enum(entity_name, fuzzy=True))
             elif entity_type == EntityType.FUNCTION:
-                all_results.extend(self.definition_extractor.extract_function(entity_name, fuzzy=True, allowed_files=allowed_files))
+                all_results.extend(scoped_extractor.extract_function(entity_name, fuzzy=True))
 
         # Deduplicate and sort by quality
         seen = set()

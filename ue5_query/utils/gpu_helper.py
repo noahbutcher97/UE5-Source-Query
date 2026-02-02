@@ -220,6 +220,10 @@ def get_gpu_summary() -> Dict[str, any]:
             summary["pytorch_compatible"] = False
             summary["warning"] = f"GPU compute capability SM {gpu_sm[0]}.{gpu_sm[1]} is too new for current PyTorch version. GPU acceleration may not work. Consider CPU-only installation or wait for PyTorch update."
 
+    # Always populate download URL so the button works even if compatible (for repairs)
+    if gpu_info:
+        summary["download_url"] = get_cuda_download_url(gpu_info.cuda_version_required)
+
     if gpu_info and cuda_installed:
         # Check if installed CUDA version is sufficient
         required_parts = [int(x) for x in gpu_info.cuda_version_required.split('.')]
@@ -231,10 +235,10 @@ def get_gpu_summary() -> Dict[str, any]:
             summary["cuda_compatible"] = True
         else:
             summary["needs_cuda_install"] = True
-            summary["download_url"] = get_cuda_download_url(gpu_info.cuda_version_required)
+            # URL already set above
     elif gpu_info:
         summary["needs_cuda_install"] = True
-        summary["download_url"] = get_cuda_download_url(gpu_info.cuda_version_required)
+        # URL already set above
 
     return summary
 

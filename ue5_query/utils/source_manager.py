@@ -59,6 +59,48 @@ class SourceManager:
             return True, f"Added path and removed {removed_count} redundant child entries."
         return True, "Path added successfully."
 
+    def add_engine_dirs(self, paths):
+        """
+        Add multiple engine directories with optimized bulk processing.
+        Returns: (success_count, messages)
+        """
+        current = self.get_engine_dirs()
+        candidate_list = list(current)
+        messages = []
+        added_count = 0
+        
+        # Add all candidates
+        for path in paths:
+            path_str = str(path)
+            if path_str not in candidate_list:
+                candidate_list.append(path_str)
+            else:
+                messages.append(f"Skipped duplicate: {Path(path_str).name}")
+
+        # Optimize once for the whole batch
+        optimized = UEPathUtils.optimize_path_list(candidate_list)
+        
+        # Analyze what happened
+        for path in paths:
+            path_str = str(path)
+            if path_str in optimized:
+                if path_str not in current:
+                    added_count += 1
+            else:
+                # If not in optimized, it was either subsumed or was a duplicate
+                # Check subsumption
+                try:
+                    parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), None)
+                    if parent and parent != path_str:
+                        messages.append(f"Skipped {Path(path_str).name}: Covered by '{Path(parent).name}'")
+                except:
+                    pass
+
+        if optimized != current:
+            self._save_engine_dirs(optimized)
+            
+        return added_count, messages
+
     def remove_engine_dir(self, path):
         current = self.get_engine_dirs()
         if path in current:
@@ -108,6 +150,42 @@ class SourceManager:
         if removed_count > 0:
             return True, f"Added path and removed {removed_count} redundant child entries."
         return True, "Path added successfully."
+
+    def add_project_dirs(self, paths):
+        """
+        Add multiple project directories with optimized bulk processing.
+        Returns: (success_count, messages)
+        """
+        current = self.get_project_dirs()
+        candidate_list = list(current)
+        messages = []
+        added_count = 0
+        
+        for path in paths:
+            path_str = str(path)
+            if path_str not in candidate_list:
+                candidate_list.append(path_str)
+            else:
+                messages.append(f"Skipped duplicate: {Path(path_str).name}")
+
+        optimized = UEPathUtils.optimize_path_list(candidate_list)
+        
+        for path in paths:
+            path_str = str(path)
+            if path_str in optimized and path_str not in current:
+                added_count += 1
+            elif path_str not in optimized:
+                try:
+                    parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), None)
+                    if parent and parent != path_str:
+                        messages.append(f"Skipped {Path(path_str).name}: Covered by '{Path(parent).name}'")
+                except:
+                    pass
+
+        if optimized != current:
+            self._save_project_dirs(optimized)
+            
+        return added_count, messages
 
     def remove_project_dir(self, path):
         current = self.get_project_dirs()

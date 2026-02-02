@@ -172,6 +172,19 @@ class MaintenanceTab:
         )
         self.btn_cuda_setup.pack(side=tk.LEFT, padx=(10, 0))
 
+        self.btn_gpu_diag = tk.Button(
+            gpu_status_frame,
+            text="🔬 Diagnostics",
+            command=self.run_gpu_diagnostics,
+            bg=Theme.SECONDARY,
+            fg="white",
+            padx=10,
+            pady=5,
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        self.btn_gpu_diag.pack(side=tk.LEFT, padx=(5, 0))
+
         # Check GPU status after UI is built
         self.dashboard.root.after(100, self.check_gpu_status)
 
@@ -198,6 +211,72 @@ class MaintenanceTab:
         
         self.maint_log = scrolledtext.ScrolledText(log_frame, font=Theme.FONT_MONO, height=10)
         self.maint_log.pack(fill=tk.BOTH, expand=True)
+
+    def run_gpu_diagnostics(self):
+        """Run the standalone GPU diagnostic script"""
+        self.log_maint("Running GPU Diagnostics...", clear=True)
+        self.btn_gpu_diag.config(state=tk.DISABLED)
+        
+        def _run():
+            try:
+                import subprocess, json, re
+                script = self.script_dir / "ue5_query" / "utils" / "gpu_test.py"
+                if not script.exists():
+                     # Fallback for dev environment
+                     script = self.script_dir.parent / "ue5_query" / "utils" / "gpu_test.py"
+                
+                python_exe = sys.executable
+                
+                process = subprocess.run(
+                    [python_exe, str(script)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                output = process.stdout.strip()
+                if not output:
+                    raise ValueError(f"No output from diagnostic script. Stderr: {process.stderr}")
+                    
+                try:
+                    data = json.loads(output)
+                except:
+                    match = re.search(r'\{.*\}', output, re.DOTALL)
+                    if match:
+                        data = json.loads(match.group(0))
+                    else:
+                        raise ValueError(f"Invalid JSON output: {output[:100]}...")
+
+                # Format report
+                report = []
+                report.append(f"--- GPU Diagnostic Report ---")
+                report.append(f"Status: {data.get('status', 'unknown').upper()}")
+                report.append(f"System CUDA: {data.get('system_cuda', 'Not Checked')}")
+                report.append(f"Device: {data.get('device_name', 'Unknown')}")
+                report.append(f"VRAM: {data.get('vram_gb', 0)} GB")
+                report.append(f"Compute Capability: {data.get('capability', 'Unknown')}")
+                report.append(f"PyTorch Version: {data.get('torch_version', 'Unknown')}")
+                report.append(f"JIT Compilation: {data.get('jit_status', 'unknown').upper()}")
+                report.append(f"Test Duration: {data.get('test_duration', 0):.4f}s")
+                
+                if data.get('error'):
+                    report.append(f"\n[ERROR] {data['error']}")
+                    if data.get('details'):
+                        report.append(f"Details:\n{data['details']}")
+                
+                if data.get('recommendation'):
+                    report.append(f"\nRecommendation:\n{data['recommendation']}")
+                
+                final_report = "\n".join(report)
+                
+                self.dashboard.root.after(0, lambda: self.log_maint(final_report, append=True))
+                self.dashboard.root.after(0, lambda: messagebox.showinfo("GPU Diagnostics", final_report))
+                
+            except Exception as e:
+                self.dashboard.root.after(0, lambda: self.log_maint(f"\nDiagnostics Failed: {e}", append=True))
+            finally:
+                self.dashboard.root.after(0, lambda: self.btn_gpu_diag.config(state=tk.NORMAL))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def log_maint(self, msg, clear=False, append=False):
         """Helper to log to maintenance log"""
@@ -283,7 +362,7 @@ class MaintenanceTab:
                     if cuda_installed and cuda_compatible:
                         status = f"✓ {gpu_name} with CUDA {cuda_installed}"
                         color = Theme.SUCCESS
-                        enable_setup = False
+                        enable_setup = True # Allow re-installation/repair
                     elif cuda_installed and not cuda_compatible:
                         status = f"⚠ {gpu_name} - CUDA {cuda_installed} (outdated)"
                         color = "#FFC107"
@@ -444,12 +523,36 @@ class MaintenanceTab:
             messagebox.showerror("Error", "CUDA download URL not available for your GPU.")
             return
 
+        # Determine dialog state based on current status
+        cuda_installed = gpu_info.get('cuda_installed')
+        cuda_compatible = gpu_info.get('cuda_compatible', False)
+        
+        dialog_title = "CUDA Setup"
+        base_msg = f"Target: CUDA Toolkit {cuda_required} for {gpu_name}\n\n"
+        warning_msg = "Note: This requires administrator privileges and takes 15-30 minutes."
+        
+        if cuda_compatible:
+            dialog_title = "Reinstall CUDA?"
+            user_msg = (f"✅ Good News: You already have a compatible version installed ({cuda_installed}).\n\n"
+                        f"You do NOT need to install this unless you are fixing a broken installation.\n\n"
+                        f"Do you want to FORCE a re-installation?")
+            icon = 'question'
+        elif cuda_installed:
+            dialog_title = "Upgrade CUDA"
+            user_msg = (f"⚠️ Update Required: Your current version ({cuda_installed}) is older than the required {cuda_required}.\n\n"
+                        f"Would you like to upgrade now?")
+            icon = 'warning'
+        else:
+            dialog_title = "Install CUDA"
+            user_msg = (f"CUDA Toolkit is missing. Installing it is highly recommended for GPU acceleration.\n\n"
+                        f"Ready to install?")
+            icon = 'info'
+
         # Confirm with user
         response = messagebox.askyesno(
-            "CUDA Setup",
-            f"This will download and install CUDA Toolkit {cuda_required} for your {gpu_name}.\n\n"
-            f"This may take 15-30 minutes and requires administrator privileges.\n\n"
-            f"Continue with CUDA installation?"
+            dialog_title,
+            f"{user_msg}\n\n{base_msg}{warning_msg}",
+            icon=icon
         )
 
         if not response:
