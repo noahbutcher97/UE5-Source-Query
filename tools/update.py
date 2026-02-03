@@ -31,38 +31,45 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-# Default exclusion patterns (Fallback if config missing)
-DEFAULT_EXCLUDES = [
-    ".venv",
-    ".git",
-    "__pycache__",
-    "*.pyc",
-    "*.pyo",
-    "*.pyd",
-    ".pytest_cache",
-    ".coverage",
-    "*.log",
-    ".DS_Store",
-    "Thumbs.db"
+import sys
+
+# --- Robust Configuration Loading ---
+# We maintain local fallbacks so this script works even if the package structure is broken.
+
+_FALLBACK_DEFAULT = [
+    ".venv", ".git", "__pycache__", "*.pyc", "*.pyo", "*.pyd", 
+    ".pytest_cache", ".coverage", "*.log", ".DS_Store", "Thumbs.db"
 ]
 
-# Deployment exclusion patterns (Fallback)
-DEPLOYMENT_EXCLUDES = [
-    "src/research",
-    "src/research/**",
-    "docs/Development",
-    "docs/Development/**",
-    "docs/_archive",
-    "docs/_archive/**",
-    "src/indexing/BuildSourceIndex.ps1",
-    "src/indexing/BuildSourceIndexAdmin.bat",
-    "tests/DEPLOYMENT_TEST_RESULTS.md",
-    "tools/setup-git-lfs.bat",
-    "CLAUDE.md",
-    "GEMINI.md",
+_FALLBACK_DEPLOYMENT = [
+    "src/research", "src/research/**",
+    "docs/_archive", "docs/_archive/**",
+    "src/indexing/BuildSourceIndex.ps1", "src/indexing/BuildSourceIndexAdmin.bat",
+    "tests/DEPLOYMENT_TEST_RESULTS.md", "tools/setup-git-lfs.bat",
+    "CLAUDE.md", "GEMINI.md",
 ]
 
-# Load rules from centralized config
+try:
+    # Attempt to import centralized constants (Source of Truth)
+    # Add project root to path
+    project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+        
+    from ue5_query.core.constants import DEFAULT_EXCLUDES, DEPLOYMENT_EXCLUDES
+except ImportError as e:
+    # Fail Loud, Fallback Safe
+    print(f"[WARN] Failed to load centralized constants: {e}", file=sys.stderr)
+    print("[WARN] Falling back to internal defaults. Exclusion lists may be outdated.", file=sys.stderr)
+    DEFAULT_EXCLUDES = _FALLBACK_DEFAULT
+    DEPLOYMENT_EXCLUDES = _FALLBACK_DEPLOYMENT
+
+# Validate (Fail Fast)
+if not DEPLOYMENT_EXCLUDES:
+    print("[FATAL] Exclusion list is empty! Aborting to prevent leaking dev artifacts.", file=sys.stderr)
+    sys.exit(1)
+
+# Load rules from centralized config (Overlays)
 try:
     config_path = Path(__file__).parent.parent / "config" / "deployment_rules.json"
     if config_path.exists():
@@ -181,6 +188,25 @@ def robust_rmtree(path: Path, max_attempts: int = 3):
     except:
         pass
 
+
+def get_git_hash(root: Path) -> str:
+    """Get current commit hash from git repo"""
+    try:
+        if not (root / ".git").exists():
+            return "unknown"
+            
+        res = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except:
+        pass
+    return "unknown"
 
 def get_version(root: Path) -> Optional[str]:
     """Get version from ue5_query/__init__.py or src/__init__.py"""
@@ -423,7 +449,7 @@ class UpdateManager:
                 )
 
             # Copy root files
-            for file_name in ["README.md", "requirements.txt", "requirements-gpu.txt", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
+            for file_name in ["README.md", "requirements.txt", "requirements-gpu.txt", "pyproject.toml", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
                 src_file = local_repo / file_name
                 dst_file = self.deployment_root / file_name
                 if src_file.exists():
@@ -530,6 +556,14 @@ class UpdateManager:
                     )
                     self.log(f"[OK] Updated {dir_name}/")
 
+            # Copy root files
+            for file_name in ["README.md", "requirements.txt", "requirements-gpu.txt", "pyproject.toml", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
+                src_file = temp_dir / file_name
+                dst_file = self.deployment_root / file_name
+                if src_file.exists():
+                    shutil.copy2(src_file, dst_file)
+                    self.log(f"[FILE] Updated {file_name}")
+
             # Restore preserved files
             self._restore_preserved_files()
 
@@ -633,6 +667,10 @@ class UpdateManager:
         self.config["deployment_info"]["last_updated"] = datetime.now().isoformat()
         self.config["deployment_info"]["update_source"] = source
         self.config["deployment_info"]["updated_from"] = str(source_path)
+        
+        # Update git hash if available from source
+        if source == "local":
+            self.config["git_hash"] = get_git_hash(source_path)
 
         with open(self.config_file, 'w') as f:
             json.dump(self.config, f, indent=2)
@@ -708,23 +746,61 @@ class UpdateManager:
             self.log(f"[ERROR] {target_path} is not a deployed installation")
             return False
 
-        # Get versions
+        # Get versions and hashes
         source_version = get_version(Path.cwd())
         target_version = get_version(target_path)
+        
+        # Check git hash (more precise than version)
+        source_hash = get_git_hash(Path.cwd())
+        target_hash = "unknown"
+        
+        try:
+            # Read deployed hash from config
+            with open(target_path / ".ue5query_deploy.json", 'r') as f:
+                target_cfg = json.load(f)
+                target_hash = target_cfg.get('git_hash', 'unknown')
+        except:
+            pass
 
         self.log(f"\n[PUSH] {target_path}")
-        self.log(f"  Source: {source_version or 'unknown'}")
-        self.log(f"  Target: {target_version or 'unknown'}")
+        self.log(f"  Source: v{source_version or '?'} ({source_hash})")
+        self.log(f"  Target: v{target_version or '?'} ({target_hash})")
 
-        if source_version and target_version and not force:
+        should_update = False
+        reason = ""
+
+        if force:
+            should_update = True
+            reason = "Force flag"
+        elif source_hash != "unknown" and source_hash != target_hash:
+            should_update = True
+            reason = f"Hash mismatch ({source_hash} != {target_hash})"
+        elif source_version and target_version:
             comparison = compare_versions(source_version, target_version)
-            if comparison == 0:
-                self.log(f"  [INFO] Versions match ({source_version}) - Syncing files...")
-                # Continue with update to allow code iteration without version bumps
-            elif comparison < 0:
-                self.log(f"  [WARN] Target is newer than source!")
-        elif force and source_version == target_version:
-            self.log(f"  [FORCE] Incremental push (same version)")
+            if comparison > 0:
+                should_update = True
+                reason = "Version upgrade"
+            elif comparison == 0:
+                # If hashes matched (or unknown) AND version matched, usually skip
+                if source_hash == "unknown":
+                    should_update = True
+                    reason = "Hash unknown, fallback to sync"
+                else:
+                    self.log(f"  [SKIP] Up to date.")
+                    return True
+            else:
+                self.log(f"  [WARN] Target is newer (v{target_version})!")
+                # Proceed anyway? Or skip? Let's skip to be safe unless force
+                return True
+        else:
+            should_update = True
+            reason = "Version/Hash indeterminate"
+
+        if not should_update:
+             self.log(f"  [SKIP] Up to date.")
+             return True
+             
+        self.log(f"  [UPDATE] Proceeding: {reason}")
 
         if dry_run:
             self.log(f"  [DRY-RUN] Would update files")
