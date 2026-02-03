@@ -74,35 +74,37 @@ except Exception as e:
     print(f"[WARN] Failed to load deployment rules: {e}")
 
 def clean_dev_files(deployment_root: Path):
-    """Remove dev-only files from existing deployment."""
-    dev_files = [
-        "src/research",
-        "docs/Development",
-        "docs/_archive",
-        "src/indexing/BuildSourceIndex.ps1",
-        "src/indexing/BuildSourceIndexAdmin.bat",
-        "CLAUDE.md",
-        "GEMINI.md",
-        "tools/setup-git-lfs.bat",
-        "tests/DEPLOYMENT_TEST_RESULTS.md",
-    ]
-
+    """Remove dev-only files from existing deployment based on DEPLOYMENT_EXCLUDES."""
     print("[CLEANUP] Removing dev-only files from deployment...")
     removed_count = 0
-
-    for file_path in dev_files:
-        full_path = deployment_root / file_path
+    
+    # Process patterns to identify root items to remove
+    items_to_remove = set()
+    for pattern in DEPLOYMENT_EXCLUDES:
+        # Normalize pattern
+        clean_pat = pattern.replace("\\", "/")
+        
+        # If it ends with /**, remove the parent dir
+        if clean_pat.endswith("/**"):
+            items_to_remove.add(clean_pat[:-3])
+        elif "**" not in clean_pat and "*" not in clean_pat:
+            # Exact match (file or dir)
+            items_to_remove.add(clean_pat)
+            
+    for item_path in items_to_remove:
+        full_path = deployment_root / item_path
         try:
-            if full_path.is_dir():
-                shutil.rmtree(full_path, ignore_errors=True)
-                print(f"  [OK] Removed dev directory: {file_path}")
-                removed_count += 1
-            elif full_path.is_file():
-                full_path.unlink(missing_ok=True)
-                print(f"  [OK] Removed dev file: {file_path}")
-                removed_count += 1
+            if full_path.exists():
+                if full_path.is_dir():
+                    shutil.rmtree(full_path, ignore_errors=True)
+                    print(f"  [OK] Removed dev directory: {item_path}")
+                    removed_count += 1
+                elif full_path.is_file():
+                    full_path.unlink(missing_ok=True)
+                    print(f"  [OK] Removed dev file: {item_path}")
+                    removed_count += 1
         except Exception as e:
-            print(f"  [WARN] Could not remove {file_path}: {e}")
+            print(f"  [WARN] Could not remove {item_path}: {e}")
 
     if removed_count > 0:
         print(f"[OK] Cleaned {removed_count} dev files/directories")

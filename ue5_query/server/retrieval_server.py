@@ -26,8 +26,20 @@ class SearchHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             
             if parsed.path == "/health":
-                return self._json({"status": "ok", "model": engine.embed_model_name})
+                return self._json({
+                    "status": "ok", 
+                    "model": engine.embed_model_name,
+                    "index_chunks": len(engine.meta) if engine.meta else 0
+                })
             
+            elif parsed.path == "/config":
+                from ue5_query.utils.agent_introspect import get_agent_config_data
+                return self._json(get_agent_config_data())
+
+            elif parsed.path == "/describe":
+                from ue5_query.core.hybrid_query import get_tool_schema
+                return self._json(get_tool_schema())
+
             elif parsed.path == "/search":
                 qs = parse_qs(parsed.query)
                 

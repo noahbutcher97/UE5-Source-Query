@@ -71,7 +71,7 @@ class SourceManagerTab:
         e_scrollbar = ttk.Scrollbar(e_list_frame)
         e_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.engine_listbox = tk.Listbox(e_list_frame, yscrollcommand=e_scrollbar.set, font=Theme.FONT_MONO, height=5)
+        self.engine_listbox = tk.Listbox(e_list_frame, yscrollcommand=e_scrollbar.set, font=Theme.FONT_MONO, height=5, selectmode=tk.EXTENDED)
         self.engine_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         e_scrollbar.config(command=self.engine_listbox.yview)
         
@@ -81,6 +81,7 @@ class SourceManagerTab:
         ttk.Button(e_btn_frame, text="+ Add Path", command=self.add_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(e_btn_frame, text="+ Add Multiple (Batch)", command=self.add_batch_engine_dirs).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(e_btn_frame, text="- Remove Selected", command=self.remove_engine_dir).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(e_btn_frame, text="Clear All", command=self.clear_engine_list).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(e_btn_frame, text="Reset to Default", command=self.reset_engine_dirs).pack(side=tk.LEFT)
         
         self.refresh_engine_list()
@@ -98,7 +99,7 @@ class SourceManagerTab:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.project_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=Theme.FONT_MONO, height=5)
+        self.project_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=Theme.FONT_MONO, height=5, selectmode=tk.EXTENDED)
         self.project_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.project_listbox.yview)
         
@@ -109,46 +110,28 @@ class SourceManagerTab:
         ttk.Button(btn_frame, text="+ Add Folder", command=self.add_project_folder, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="+ Add Multiple (Batch)", command=self.add_batch_folders).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="+ Add .uproject", command=self.add_project_uproject, style="Accent.TButton").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_frame, text="- Remove Selected", command=self.remove_project_folder).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="- Remove Selected", command=self.remove_project_folder).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Clear All", command=self.clear_project_list).pack(side=tk.LEFT)
 
         self.refresh_project_list()
 
-        # --- Index Actions (Bottom) ---
-        actions_frame = ttk.LabelFrame(main_frame, text=" Index Management ", padding=15)
-        actions_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        # Index Management
+        idx_frame = ttk.LabelFrame(main_frame, text=" Index Management ", padding=15)
+        idx_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
 
-        # Buttons
-        idx_btn_frame = ttk.Frame(actions_frame)
-        idx_btn_frame.pack(fill=tk.X, pady=(0, 10))
+        actions_frame = ttk.Frame(idx_frame)
+        actions_frame.pack(fill=tk.X)
 
-        self.btn_update = tk.Button(
-            idx_btn_frame,
-            text="⚡ Update Index (Incremental)",
-            command=lambda: self.run_index_update(force=False),
-            bg=Theme.SUCCESS,
-            fg="white",
-            padx=15, pady=5, relief=tk.FLAT, cursor="hand2"
-        )
+        self.btn_update = ttk.Button(actions_frame, text="⚡ Update Index (Incremental)", command=lambda: self.run_index_update(force=False))
         self.btn_update.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.btn_rebuild = tk.Button(
-            idx_btn_frame,
-            text="🔄 Full Rebuild (Force)",
-            command=lambda: self.run_index_update(force=True),
-            bg=Theme.SECONDARY,
-            fg="white",
-            padx=15, pady=5, relief=tk.FLAT, cursor="hand2"
-        )
-        self.btn_rebuild.pack(side=tk.LEFT)
+        self.btn_rebuild = ttk.Button(actions_frame, text="🔄 Full Rebuild (Force)", command=lambda: self.run_index_update(force=True), style='Accent.TButton')
+        self.btn_rebuild.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.var_include_docs = tk.BooleanVar(value=False)
+        ttk.Checkbutton(actions_frame, text="Index Docs (.md)", variable=self.var_include_docs).pack(side=tk.LEFT, padx=10)
 
-        self.btn_cancel = tk.Button(
-            idx_btn_frame,
-            text="Stop",
-            command=self.cancel_op,
-            bg="#7F8C8D", fg="white",
-            padx=10, pady=5, relief=tk.FLAT, cursor="hand2",
-            state=tk.DISABLED
-        )
+        self.btn_cancel = ttk.Button(actions_frame, text="Stop", command=self.cancel_op, state=tk.DISABLED)
         self.btn_cancel.pack(side=tk.RIGHT)
 
         # Progress UI
@@ -264,7 +247,11 @@ class SourceManagerTab:
                 self.dashboard.root.after(0, lambda p=prog, l=label: update_progress(p, l))
 
         # Use extracted command builder
-        args = get_rebuild_command(self.script_dir, force=force)
+        args = get_rebuild_command(
+            self.script_dir, 
+            force=force, 
+            include_docs=self.var_include_docs.get()
+        )
 
         self.maint_service.run_task(
             task_name=f"Index {mode}",
@@ -349,12 +336,24 @@ class SourceManagerTab:
         BatchFolderDialog(self.frame.winfo_toplevel(), initial_dir=start_dir, on_add=_on_add)
 
     def remove_engine_dir(self):
-        sel = self.engine_listbox.curselection()
-        if sel:
-            path = self.engine_listbox.get(sel[0])
-            if messagebox.askyesno("Confirm", f"Remove '{path}' from list?"):
-                self.source_manager.remove_engine_dir(path)
-                self.refresh_engine_list()
+        selection = self.engine_listbox.curselection()
+        if not selection: return
+        
+        paths = [self.engine_listbox.get(i) for i in selection]
+        count = len(paths)
+        if messagebox.askyesno("Confirm", f"Remove {count} selected path(s) from list?"):
+            success, msg = self.source_manager.remove_engine_dirs(
+                paths, 
+                engine_root=self.engine_path_var.get().strip()
+            )
+            self.refresh_engine_list()
+            if not success:
+                messagebox.showinfo("Info", msg)
+
+    def clear_engine_list(self):
+        if messagebox.askyesno("Confirm", "Remove ALL engine source paths? Index will be empty."):
+            self.source_manager.clear_engine_dirs()
+            self.refresh_engine_list()
 
     def reset_engine_dirs(self):
         if messagebox.askyesno("Confirm", "Reset engine source list to defaults?"):
@@ -410,10 +409,18 @@ class SourceManagerTab:
         BatchFolderDialog(self.frame.winfo_toplevel(), on_add=_on_add)
 
     def remove_project_folder(self):
-        sel = self.project_listbox.curselection()
-        if not sel:
-            return
-        path = self.project_listbox.get(sel[0])
-        if messagebox.askyesno("Confirm", f"Remove '{path}' from index?"):
-            self.source_manager.remove_project_dir(path)
+        selection = self.project_listbox.curselection()
+        if not selection: return
+        
+        paths = [self.project_listbox.get(i) for i in selection]
+        count = len(paths)
+        if messagebox.askyesno("Confirm", f"Remove {count} selected folder(s) from index?"):
+            success, msg = self.source_manager.remove_project_dirs(paths)
+            self.refresh_project_list()
+            if not success:
+                messagebox.showinfo("Info", msg)
+
+    def clear_project_list(self):
+        if messagebox.askyesno("Confirm", "Remove ALL project folders?"):
+            self.source_manager.clear_project_dirs()
             self.refresh_project_list()

@@ -57,7 +57,7 @@ def parse_index_progress(line: str) -> Tuple[Optional[int], Optional[str]]:
 
     return None, None
 
-def get_rebuild_command(script_dir: Path, force: bool = False, verbose: bool = True) -> List[str]:
+def get_rebuild_command(script_dir: Path, force: bool = False, verbose: bool = True, include_docs: bool = False) -> List[str]:
     """
     Construct the command to run the rebuild-index script.
     
@@ -65,6 +65,7 @@ def get_rebuild_command(script_dir: Path, force: bool = False, verbose: bool = T
         script_dir: The root directory containing 'tools'
         force: If True, adds --force (full rebuild). If False, defaults to incremental.
         verbose: If True, adds --verbose.
+        include_docs: If True, adds --include-docs.
         
     Returns:
         List of command arguments.
@@ -79,5 +80,8 @@ def get_rebuild_command(script_dir: Path, force: bool = False, verbose: bool = T
         cmd.append("--force")
     else:
         cmd.append("--incremental")
+        
+    if include_docs:
+        cmd.append("--include-docs")
         
     return cmd

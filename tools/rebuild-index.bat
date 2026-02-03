@@ -111,6 +111,9 @@ if /i "%~1"=="--incremental" (
     set "BUILD_ARGS=%BUILD_ARGS% --incremental"
     set "INCREMENTAL_MODE=1"
 )
+if /i "%~1"=="--include-docs" (
+    set "BUILD_ARGS=%BUILD_ARGS% --include-docs"
+)
 if /i "%~1"=="--verbose" (
     set "BUILD_ARGS=%BUILD_ARGS% --verbose"
     set "SHOW_PROGRESS=1"

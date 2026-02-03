@@ -122,8 +122,8 @@ class BatchFolderDialog(tk.Toplevel):
         self.checkbox_vars = {} # Map Path -> BooleanVar
         
         try:
-            # List immediate subdirectories
-            subdirs = [d for d in self.root_path.iterdir() if d.is_dir() and not d.name.startswith('.')]
+            # List immediate subdirectories (including hidden ones)
+            subdirs = [d for d in self.root_path.iterdir() if d.is_dir()]
             subdirs.sort(key=lambda x: x.name.lower())
             
             if not subdirs:

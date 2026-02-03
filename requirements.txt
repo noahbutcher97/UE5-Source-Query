@@ -13,6 +13,10 @@ requests>=2.31.0
 tqdm>=4.65.0
 psutil>=5.9.0
 
+# Document handling
+pypdf>=3.0.0
+python-docx>=0.8.11
+
 # Installation:
 # 1. Create virtual environment:
 #    python -m venv .venv

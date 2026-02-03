@@ -1,6 +1,6 @@
 {
   "dev_repo": "D:\\DevTools\\UE5-Source-Query",
-  "last_updated": "2026-02-02T17:09:40.585995",
+  "last_updated": "2026-02-02T23:35:35.875230",
   "deployments": {
     "d6c3b31d098e": {
       "path": "D:\\UnrealProjects\\5.3\\hijack_prototype\\Scripts",
@@ -15,7 +15,7 @@
       "path": "D:\\UnrealProjects\\5.6\\KatanaCombat\\Tools\\UE5-Source-Query",
       "deployed_from": "D:\\DevTools\\UE5-Source-Query",
       "deployed_at": "2026-02-02T21:45:32.165916+00:00",
-      "last_updated": "2026-02-02T17:09:07.902120",
+      "last_updated": "2026-02-02T20:28:26.737629",
       "is_valid": true,
       "issues": [],
       "status": "Ready"

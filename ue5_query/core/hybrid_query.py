@@ -271,6 +271,18 @@ class HybridQueryEngine:
         
         timing['total_s'] = time.perf_counter() - t_start
 
+        # Log event for M2M monitoring
+        try:
+            from ue5_query.utils.activity_logger import get_activity_logger
+            get_activity_logger().log_event("query_executed", {
+                "question": question[:100],
+                "type": intent.query_type.value,
+                "scope": scope,
+                "duration_s": round(timing['total_s'], 3),
+                "results_count": len(combined_results)
+            })
+        except: pass
+
         return {
             'question': question,
             'intent': {
@@ -592,12 +604,55 @@ def print_results(results: Dict[str, Any], show_reasoning: bool = False):
         print(f"{key}: {val:.3f}s")
 
 
+def get_tool_schema():
+    """Return the tool definition schema (OpenAI Function/MCP compatible)"""
+    return {
+        "name": "ue5_search",
+        "description": "Hybrid semantic search and definition extraction for Unreal Engine 5 source code. Use this to find C++ classes, structs, functions, and documentation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The search query (e.g. 'How does FHitResult work?', 'UCharacterMovementComponent::PhysSlide')"
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["engine", "project", "all"],
+                    "default": "engine",
+                    "description": "Limit search to Engine source, Project source, or All."
+                },
+                "top_k": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Number of results to return."
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["text", "json", "code"],
+                    "default": "text",
+                    "description": "Output format. Use 'json' for programmatic parsing."
+                }
+            },
+            "required": ["question"]
+        },
+        "capabilities": {
+            "semantic_search": True,
+            "exact_definition_lookup": True,
+            "streaming": False
+        }
+    }
+
+def print_tool_schema():
+    print(json.dumps(get_tool_schema(), indent=2))
+
 def main():
     parser = argparse.ArgumentParser(
         description="Hybrid query engine combining definition extraction and semantic search",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("question", nargs="+", help="Your query")
+    parser.add_argument("question", nargs="*", help="Your query (optional if using --describe)")
+    parser.add_argument("--describe", action="store_true", help="Output machine-readable tool schema")
     parser.add_argument("--top-k", type=int, default=5, help="Number of results (default: 5)")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--dry-run", action="store_true", help="Skip API call")
@@ -609,30 +664,55 @@ def main():
     parser.add_argument("--use-reranker", action="store_true", help="Enable re-ranking (slower, higher precision)")
 
     args = parser.parse_args()
+
+    # Handle Introspection
+    if args.describe:
+        print_tool_schema()
+        sys.exit(0)
+
+    if not args.question:
+        parser.print_help()
+        sys.exit(1)
+
     question = " ".join(args.question)
 
-    # Instantiate the engine
-    engine = HybridQueryEngine(TOOL_ROOT)
+    try:
+        # Instantiate the engine
+        engine = HybridQueryEngine(TOOL_ROOT)
 
-    # Perform hybrid query
-    results = engine.query(
-        question=question,
-        top_k=args.top_k,
-        dry_run=args.dry_run,
-        show_reasoning=args.show_reasoning,
-        scope=args.scope,
-        embed_model_name=args.model,
-        use_reranker=args.use_reranker,
-        # Pass other args if needed by semantic search, etc.
-        pattern=args.pattern,
-        extensions=args.extensions
-    )
+        # Perform hybrid query
+        results = engine.query(
+            question=question,
+            top_k=args.top_k,
+            dry_run=args.dry_run,
+            show_reasoning=args.show_reasoning,
+            scope=args.scope,
+            embed_model_name=args.model,
+            use_reranker=args.use_reranker,
+            # Pass other args if needed by semantic search, etc.
+            pattern=args.pattern,
+            extensions=args.extensions
+        )
 
-    # Output results
-    if args.json:
-        print(json.dumps(results, indent=2))
-    else:
-        print_results(results, show_reasoning=args.show_reasoning)
+        # Check if results found
+        has_results = bool(results.get('definition_results') or results.get('semantic_results'))
+
+        # Output results
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            print_results(results, show_reasoning=args.show_reasoning)
+        
+        # Exit code 0 if results found, 2 if empty (but valid execution)
+        sys.exit(0 if has_results else 2)
+
+    except Exception as e:
+        # Exit code 1 for runtime errors
+        if args.json:
+            print(json.dumps({"error": str(e), "status": "error"}))
+        else:
+            logger.error(f"Query execution failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

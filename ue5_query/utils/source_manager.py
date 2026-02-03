@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from ue5_query.utils.file_utils import atomic_write
 from ue5_query.utils.ue_path_utils import UEPathUtils
@@ -12,6 +13,23 @@ class SourceManager:
         self.engine_template_file = package_root / "indexing" / "EngineDirs.template.txt"
         self.engine_dirs_file = package_root / "indexing" / "EngineDirs.txt"
         self.project_dirs_file = package_root / "indexing" / "ProjectDirs.txt"
+
+    def _normalize(self, path_str):
+        """Normalize path for consistent comparison"""
+        try:
+            return os.path.normpath(str(Path(path_str).resolve()))
+        except:
+            return os.path.normpath(str(path_str))
+
+    def _is_duplicate(self, path_str, current_list):
+        """Check if path exists in list (case-insensitive on Windows)"""
+        norm_path = self._normalize(path_str).lower() if os.name == 'nt' else self._normalize(path_str)
+        
+        for existing in current_list:
+            norm_existing = self._normalize(existing).lower() if os.name == 'nt' else self._normalize(existing)
+            if norm_path == norm_existing:
+                return True
+        return False
 
     def get_default_engine_dirs(self):
         """Reads the default engine directories from the template file."""
@@ -34,8 +52,8 @@ class SourceManager:
         current = self.get_engine_dirs()
         path_str = str(path)
         
-        # 1. Check if exact duplicate
-        if path_str in current:
+        # 1. Check if exact duplicate (Robust)
+        if self._is_duplicate(path_str, current):
             return False, "Path already exists."
 
         # 2. Add and Optimize
@@ -43,7 +61,8 @@ class SourceManager:
         optimized = UEPathUtils.optimize_path_list(candidate_list)
         
         # 3. Analyze changes for feedback
-        if path_str not in optimized:
+        # Check if our new path survived optimization
+        if not self._is_duplicate(path_str, optimized):
             # The new path was redundant (a parent already exists)
             # Find which parent covers it
             parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), "a parent folder")
@@ -72,7 +91,7 @@ class SourceManager:
         # Add all candidates
         for path in paths:
             path_str = str(path)
-            if path_str not in candidate_list:
+            if not self._is_duplicate(path_str, candidate_list):
                 candidate_list.append(path_str)
             else:
                 messages.append(f"Skipped duplicate: {Path(path_str).name}")
@@ -83,8 +102,8 @@ class SourceManager:
         # Analyze what happened
         for path in paths:
             path_str = str(path)
-            if path_str in optimized:
-                if path_str not in current:
+            if self._is_duplicate(path_str, optimized):
+                if not self._is_duplicate(path_str, current):
                     added_count += 1
             else:
                 # If not in optimized, it was either subsumed or was a duplicate
@@ -101,13 +120,48 @@ class SourceManager:
             
         return added_count, messages
 
-    def remove_engine_dir(self, path):
+    def remove_engine_dirs(self, paths_to_remove, engine_root=None):
+        """Batch remove engine directories"""
         current = self.get_engine_dirs()
-        if path in current:
-            current.remove(path)
-            self._save_engine_dirs(current)
-            return True
-        return False
+        if engine_root is None:
+            engine_root = os.getenv("UE_ENGINE_ROOT", "")
+        
+        # Normalize targets for comparison
+        norm_targets = set()
+        for p in paths_to_remove:
+            norm = self._normalize(p).lower() if os.name == 'nt' else self._normalize(p)
+            norm_targets.add(norm)
+        
+        new_list = []
+        removed_count = 0
+        
+        for entry in current:
+            # Resolve placeholders
+            resolved = entry
+            if "{ENGINE_ROOT}" in entry and engine_root:
+                resolved = entry.replace("{ENGINE_ROOT}", engine_root)
+            
+            norm_entry = self._normalize(resolved).lower() if os.name == 'nt' else self._normalize(resolved)
+            
+            if norm_entry in norm_targets:
+                removed_count += 1
+                continue
+            
+            new_list.append(entry)
+            
+        if removed_count > 0:
+            self._save_engine_dirs(new_list)
+            return True, f"Removed {removed_count} paths."
+        return False, "No matching paths found."
+
+    def clear_engine_dirs(self):
+        """Remove all engine directories"""
+        self._save_engine_dirs([])
+
+    def remove_engine_dir(self, path_to_remove):
+        # Legacy wrapper
+        success, _ = self.remove_engine_dirs([path_to_remove])
+        return success
 
     def reset_engine_dirs(self):
         self._save_engine_dirs(self.get_default_engine_dirs())
@@ -134,13 +188,13 @@ class SourceManager:
         current = self.get_project_dirs()
         path_str = str(path)
         
-        if path_str in current:
+        if self._is_duplicate(path_str, current):
             return False, "Path already exists."
 
         candidate_list = current + [path_str]
         optimized = UEPathUtils.optimize_path_list(candidate_list)
         
-        if path_str not in optimized:
+        if not self._is_duplicate(path_str, optimized):
             parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), "a parent folder")
             return False, f"Skipped: Covered by '{parent}'."
         
@@ -163,7 +217,7 @@ class SourceManager:
         
         for path in paths:
             path_str = str(path)
-            if path_str not in candidate_list:
+            if not self._is_duplicate(path_str, candidate_list):
                 candidate_list.append(path_str)
             else:
                 messages.append(f"Skipped duplicate: {Path(path_str).name}")
@@ -172,9 +226,9 @@ class SourceManager:
         
         for path in paths:
             path_str = str(path)
-            if path_str in optimized and path_str not in current:
+            if self._is_duplicate(path_str, optimized) and not self._is_duplicate(path_str, current):
                 added_count += 1
-            elif path_str not in optimized:
+            elif not self._is_duplicate(path_str, optimized):
                 try:
                     parent = next((p for p in optimized if Path(path_str).is_relative_to(Path(p))), None)
                     if parent and parent != path_str:
@@ -187,13 +241,39 @@ class SourceManager:
             
         return added_count, messages
 
-    def remove_project_dir(self, path):
+    def remove_project_dirs(self, paths_to_remove):
+        """Batch remove project directories"""
         current = self.get_project_dirs()
-        if path in current:
-            current.remove(path)
-            self._save_project_dirs(current)
-            return True
-        return False
+        
+        norm_targets = set()
+        for p in paths_to_remove:
+            norm = self._normalize(p).lower() if os.name == 'nt' else self._normalize(p)
+            norm_targets.add(norm)
+        
+        new_list = []
+        removed_count = 0
+        
+        for entry in current:
+            norm_entry = self._normalize(entry).lower() if os.name == 'nt' else self._normalize(entry)
+            
+            if norm_entry in norm_targets:
+                removed_count += 1
+                continue
+            new_list.append(entry)
+            
+        if removed_count > 0:
+            self._save_project_dirs(new_list)
+            return True, f"Removed {removed_count} paths."
+        return False, "No matching paths found."
+
+    def clear_project_dirs(self):
+        """Remove all project directories"""
+        self._save_project_dirs([])
+
+    def remove_project_dir(self, path_to_remove):
+        # Legacy wrapper
+        success, _ = self.remove_project_dirs([path_to_remove])
+        return success
 
     def _save_project_dirs(self, dirs):
         self.project_dirs_file.parent.mkdir(parents=True, exist_ok=True)

@@ -14,6 +14,16 @@ try:
 except ImportError:
     tqdm = None
 
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
+try:
+    from docx import Document
+except ImportError:
+    Document = None
+
 # Suppress CUDA compatibility warnings for PTX JIT compilation
 # This allows SM 120 GPUs (RTX 5090) to work via PTX compatibility mode
 # while avoiding error spam in the output
@@ -51,9 +61,51 @@ GPU_DEVICE = None  # Will be set during model initialization
 
 EXTENSIONS = {".cpp", ".h", ".hpp", ".inl", ".cs"}
 if os.getenv("INDEX_DOCS", "0") == "1":
-    EXTENSIONS |= {".md", ".txt"}
+    # Add text-based formats (including variants)
+    EXTENSIONS |= {
+        ".md", ".markdown", ".rst",       # Docs
+        ".txt", ".text",                  # Plain text
+        ".csv", ".tsv",                   # Data
+        ".xml", ".json", ".jsonc",        # Data/Config
+        ".yaml", ".yml", ".toml", ".ini", # Config
+        ".html", ".htm", ".css", ".js"    # Web
+    }
+    # Add binary formats if dependencies present
+    if PdfReader: EXTENSIONS.add(".pdf")
+    if Document: 
+        EXTENSIONS.add(".docx")
+        EXTENSIONS.add(".docm") # Macro-enabled Word docs are structure-compatible
 
 MAX_FILE_CHARS = 120_000
+
+def extract_text_from_file(path: Path) -> str:
+    """Extract text content from various file formats."""
+    suffix = path.suffix.lower()
+    
+    try:
+        # PDF Handling
+        if suffix == ".pdf":
+            if not PdfReader: return ""
+            reader = PdfReader(str(path))
+            # Extract text from all pages
+            text = []
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted: text.append(extracted)
+            return "\n".join(text)
+            
+        # DOCX Handling (and variants)
+        if suffix in {".docx", ".docm"}:
+            if not Document: return ""
+            doc = Document(str(path))
+            return "\n".join([p.text for p in doc.paragraphs])
+            
+        # Default Text Handling
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        # Log error but don't crash indexing
+        # print(f"Warning: Failed to read {path.name}: {e}") 
+        return ""
 
 # Chunking configuration
 USE_SEMANTIC_CHUNKING = os.getenv("SEMANTIC_CHUNKING", "1" if DEFAULT_SEMANTIC_CHUNKING else "0") == "1"
@@ -444,6 +496,8 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
           ps_serve_http: bool = False, ps_bind_host: str = "127.0.0.1", ps_port: int = 8008,
           ps_background_server: bool = False, ps_engine_dirs_file: str = "EngineDirs.txt") -> None:
 
+    t_start_total = time.time()
+
     # Configure output directory dynamically
     global OUT_VECTORS, OUT_META, CACHE_FILE
     if output_dir:
@@ -566,7 +620,34 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
         print("No source files found (Engine or Project). Check paths and exclusion patterns.")
         return
 
+    from ue5_query.utils.activity_logger import get_activity_logger
+    logger_m2m = get_activity_logger()
+    logger_m2m.log_event("index_build_started", {
+        "incremental": incremental,
+        "force": force,
+        "engine_files": len(engine_files),
+        "project_files": len(project_files) if 'project_files' in locals() else 0
+    })
+
     existing_embeddings, existing_meta = load_existing()
+
+    # Safety Check: Prevent accidental wipe of Engine index during incremental update
+    # This catches cases where EngineDirs.txt is missing/empty but ProjectDirs.txt works,
+    # causing the script to think all engine files were deleted.
+    if incremental and not force and existing_meta:
+        old_engine_count = sum(1 for m in existing_meta if m.get('origin') == 'engine')
+        # Count files tagged as engine in the new scan list
+        new_engine_count = len(engine_files)
+        
+        # If we had a significant index (>100 files) and now found 0, something is likely wrong with configuration
+        if old_engine_count > 100 and new_engine_count == 0:
+            print(f"\n[CRITICAL] Safety Brake Triggered!")
+            print(f"Incremental update would wipe {old_engine_count} engine files from index.")
+            print(f"Reason: Scan found 0 engine files (path configuration error?).")
+            print("Aborting to prevent data loss. Please check Engine Source configuration.")
+            print("To fix: Run a FULL REBUILD (Force) if you intend to remove these files.\n")
+            sys.exit(1)
+
     cache = load_cache() if incremental and not force else {}
 
     # Initialize enricher for single-pass indexing
@@ -585,8 +666,10 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     iterator = tqdm(files_with_origin, desc="Scanning files", unit="file") if use_tqdm else files_with_origin
     for file, origin in iterator:
         try:
-            raw = file.read_text(encoding="utf-8", errors="ignore")
-        except OSError as e:
+            raw = extract_text_from_file(file)
+            if not raw: # Skip empty or unreadable files
+                continue
+        except Exception as e:
             if verbose:
                 print(f"Warning: Could not read {file}: {e}")
             continue
@@ -609,9 +692,19 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
             # Single-pass enrichment
             enrichment = enricher.get_enrichment_data(chunk, str(file))
             
+            # Determine category (Code vs Documentation vs Data)
+            suffix = file.suffix.lower()
+            if suffix in {'.md', '.txt', '.pdf', '.docx', '.html'}:
+                category = 'doc'
+            elif suffix in {'.csv', '.xml', '.json', '.yaml', '.toml'}:
+                category = 'data'
+            else:
+                category = 'code'
+            
             new_meta.append({
                 "path": str(file),
                 "origin": origin,
+                "category": category,
                 "chunk_index": idx,
                 "total_chunks": len(chunks),
                 "chars": len(chunk),
@@ -645,28 +738,52 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     total_chunks = len(meta)
     new_chunks = len(new_meta)
 
-    print(f"Done. Total chunks={total_chunks} (new={new_chunks} reused={len(reused_meta)})")
-    print(f"Embedding phase {embed_duration:.1f}s")
-
-    # Show performance statistics
+    # Gather Detailed Statistics
+    import datetime
+    
+    unique_files = {m['path'] for m in meta}
+    engine_files = {m['path'] for m in meta if m.get('origin') == 'engine'}
+    project_files = {m['path'] for m in meta if m.get('origin') == 'project'}
+    
+    # Calculate index sizes approximately (embedding array size + meta file size)
+    # This is rough as .npz is compressed
+    index_size_mb = (OUT_VECTORS.stat().st_size + OUT_META.stat().st_size) / (1024*1024)
+    
+    print("\n" + "="*60)
+    print(" BUILD STATISTICS")
+    print("="*60)
+    print(f"Timestamp:          {datetime.datetime.now().replace(microsecond=0)}")
+    print(f"Total Files:        {len(unique_files)}")
+    print(f"  - Engine:         {len(engine_files)}")
+    print(f"  - Project:        {len(project_files)}")
+    print(f"Total Chunks:       {total_chunks} (New: {new_chunks}, Reused: {len(reused_meta)})")
+    print(f"Index Size:         {index_size_mb:.2f} MB")
+    print(f"Embedding Time:     {embed_duration:.1f}s")
+    print(f"Total Duration:     {time.time() - t_start_total:.1f}s")
+    
     if new_chunks > 0:
         chunks_per_sec = new_chunks / embed_duration
-        print(f"Performance: {chunks_per_sec:.1f} chunks/second")
+        print(f"Performance:        {chunks_per_sec:.1f} chunks/sec")
+    
+    # Device context
+    try:
+        import torch
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
+            print(f"Device:             {props.name} (SM {props.major}.{props.minor})")
+            if props.major >= 12: # Blackwell check
+                print("                    (PTX Compatibility Mode Active)")
+    except:
+        pass
+        
+    print("="*60)
 
-        # Provide context based on device used
-        if GPU_DEVICE == "cuda":
-            try:
-                import torch
-                capability = torch.cuda.get_device_capability(0)
-                sm_version = capability[0] * 10 + capability[1]
-                if sm_version > 90:
-                    print(f"  (GPU via PTX compatibility - native SM {capability[0]}.{capability[1]} support would be faster)")
-                else:
-                    print(f"  (GPU accelerated - SM {capability[0]}.{capability[1]} native support)")
-            except:
-                pass
-        else:
-            print(f"  (CPU mode - GPU would be 40-200x faster)")
+    logger_m2m.log_event("index_build_complete", {
+        "total_chunks": total_chunks,
+        "new_chunks": new_chunks,
+        "duration_s": round(time.time() - t_start_total, 2),
+        "size_mb": round(index_size_mb, 2)
+    })
 
     print(f"Wrote {OUT_VECTORS.name}, {OUT_META.name}")
 
