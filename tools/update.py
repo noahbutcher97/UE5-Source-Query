@@ -181,9 +181,14 @@ def robust_rmtree(path: Path, max_attempts: int = 3):
 
 
 def get_version(root: Path) -> Optional[str]:
-    """Get version from src/__init__.py"""
+    """Get version from ue5_query/__init__.py or src/__init__.py"""
     try:
-        init_file = root / "src" / "__init__.py"
+        # Check new structure first
+        init_file = root / "ue5_query" / "__init__.py"
+        if not init_file.exists():
+            # Fallback to legacy
+            init_file = root / "src" / "__init__.py"
+            
         if init_file.exists():
             with open(init_file, 'r') as f:
                 for line in f:
@@ -416,7 +421,7 @@ class UpdateManager:
                 )
 
             # Copy root files
-            for file_name in ["README.md", "requirements.txt", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
+            for file_name in ["README.md", "requirements.txt", "requirements-gpu.txt", "ask.bat", "launcher.bat", "Setup.bat", "bootstrap.py"]:
                 src_file = local_repo / file_name
                 dst_file = self.deployment_root / file_name
                 if src_file.exists():
@@ -712,8 +717,8 @@ class UpdateManager:
         if source_version and target_version and not force:
             comparison = compare_versions(source_version, target_version)
             if comparison == 0:
-                self.log(f"  [SKIP] Already up-to-date (use --force for incremental push)")
-                return True
+                self.log(f"  [INFO] Versions match ({source_version}) - Syncing files...")
+                # Continue with update to allow code iteration without version bumps
             elif comparison < 0:
                 self.log(f"  [WARN] Target is newer than source!")
         elif force and source_version == target_version:

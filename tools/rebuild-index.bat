@@ -102,10 +102,15 @@ echo.
 REM Parse arguments
 set "BUILD_ARGS=--dirs-file %SCRIPT_DIR%..\ue5_query\indexing\EngineDirs.txt"
 set "SHOW_PROGRESS=0"
+set "INCREMENTAL_MODE=0"
 
 :parse_loop
 if "%~1"=="" goto :end_parse
 if /i "%~1"=="--force" set "BUILD_ARGS=%BUILD_ARGS% --force"
+if /i "%~1"=="--incremental" (
+    set "BUILD_ARGS=%BUILD_ARGS% --incremental"
+    set "INCREMENTAL_MODE=1"
+)
 if /i "%~1"=="--verbose" (
     set "BUILD_ARGS=%BUILD_ARGS% --verbose"
     set "SHOW_PROGRESS=1"
@@ -134,17 +139,21 @@ REM Check existing index
 if exist "%VECTOR_DIR%\vector_store.npz" (
     echo Found existing index at: %VECTOR_DIR%\vector_store.npz
 
-    REM Check if --force was provided
-    echo %BUILD_ARGS% | findstr /C:"--force" >nul
-    if errorlevel 1 (
-        echo.
-        set /p "CONFIRM=Rebuild will overwrite existing index. Continue? (y/N): "
-        if /i not "!CONFIRM!"=="y" (
-            echo Operation cancelled.
-            exit /b 0
-        )
+    if %INCREMENTAL_MODE%==1 (
+        echo Incremental mode: Updating existing index...
     ) else (
-        echo --force flag detected, rebuilding automatically...
+        REM Check if --force was provided
+        echo %BUILD_ARGS% | findstr /C:"--force" >nul
+        if errorlevel 1 (
+            echo.
+            set /p "CONFIRM=Rebuild will overwrite existing index. Continue? (y/N): "
+            if /i not "!CONFIRM!"=="y" (
+                echo Operation cancelled.
+                exit /b 0
+            )
+        ) else (
+            echo --force flag detected, rebuilding automatically...
+        )
     )
     echo.
 )

@@ -9,7 +9,9 @@ python-dotenv>=1.0.0          # Environment variable management
 nvidia-ml-py>=12.535.0        # Fix for pynvml deprecation warning in PyTorch
 
 # Optional dependencies
-tqdm>=4.65.0                  # Progress bars for indexing (optional but recommended)
+requests>=2.31.0
+tqdm>=4.65.0
+psutil>=5.9.0
 
 # Installation:
 # 1. Create virtual environment:

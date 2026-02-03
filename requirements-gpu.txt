@@ -1,7 +1,7 @@
 # UE5.3 Vector Search System - GPU-Accelerated Dependencies
 
 # GPU-accelerated PyTorch (CUDA 12.8+ for RTX 5090 native support)
---index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://download.pytorch.org/whl/cu128
 torch>=2.9.1
 
 # Core dependencies
@@ -12,6 +12,7 @@ python-dotenv>=1.0.0          # Environment variable management
 
 # Optional dependencies
 tqdm>=4.65.0                  # Progress bars for indexing (optional but recommended)
+psutil>=5.9.0
 
 # Installation for GPU acceleration:
 # 1. Ensure NVIDIA drivers and CUDA toolkit are installed

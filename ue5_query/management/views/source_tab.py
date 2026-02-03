@@ -1,6 +1,8 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 import sys
+import time
+import threading
 from pathlib import Path
 
 # Try to import Theme, handle missing imports gracefully
@@ -8,6 +10,7 @@ try:
     from ue5_query.utils.gui_theme import Theme
     from ue5_query.utils.engine_helper import resolve_uproject_source
     from ue5_query.management.views.batch_folder_dialog import BatchFolderDialog
+    from ue5_query.utils.index_helper import parse_index_progress, get_rebuild_command
 except ImportError:
     # If run standalone
     try:
@@ -15,6 +18,7 @@ except ImportError:
         from ue5_query.utils.gui_theme import Theme
         from ue5_query.utils.engine_helper import resolve_uproject_source
         from ue5_query.management.views.batch_folder_dialog import BatchFolderDialog
+        from ue5_query.utils.index_helper import parse_index_progress, get_rebuild_command
     except ImportError:
         Theme = None
 
@@ -32,14 +36,21 @@ class SourceManagerTab:
         self.dashboard = dashboard
         self.source_manager = dashboard.source_manager
         self.engine_path_var = dashboard.engine_path_var
+        self.maint_service = dashboard.maint_service
+        self.script_dir = dashboard.script_dir
+        self.cancelled = False
 
         self.build_ui()
 
     def build_ui(self):
         """Build the UI components"""
+        # Main layout: PanedWindow for lists, then Actions below
+        main_frame = ttk.Frame(self.frame)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
         # Use PanedWindow for responsive vertical split
-        paned = ttk.PanedWindow(self.frame, orient=tk.VERTICAL)
-        paned.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        paned = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
 
         # --- Engine Section ---
         engine_frame = ttk.LabelFrame(paned, text=" Engine Source (Managed) ", padding=15)
@@ -101,6 +112,166 @@ class SourceManagerTab:
         ttk.Button(btn_frame, text="- Remove Selected", command=self.remove_project_folder).pack(side=tk.LEFT)
 
         self.refresh_project_list()
+
+        # --- Index Actions (Bottom) ---
+        actions_frame = ttk.LabelFrame(main_frame, text=" Index Management ", padding=15)
+        actions_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+
+        # Buttons
+        idx_btn_frame = ttk.Frame(actions_frame)
+        idx_btn_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.btn_update = tk.Button(
+            idx_btn_frame,
+            text="⚡ Update Index (Incremental)",
+            command=lambda: self.run_index_update(force=False),
+            bg=Theme.SUCCESS,
+            fg="white",
+            padx=15, pady=5, relief=tk.FLAT, cursor="hand2"
+        )
+        self.btn_update.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.btn_rebuild = tk.Button(
+            idx_btn_frame,
+            text="🔄 Full Rebuild (Force)",
+            command=lambda: self.run_index_update(force=True),
+            bg=Theme.SECONDARY,
+            fg="white",
+            padx=15, pady=5, relief=tk.FLAT, cursor="hand2"
+        )
+        self.btn_rebuild.pack(side=tk.LEFT)
+
+        self.btn_cancel = tk.Button(
+            idx_btn_frame,
+            text="Stop",
+            command=self.cancel_op,
+            bg="#7F8C8D", fg="white",
+            padx=10, pady=5, relief=tk.FLAT, cursor="hand2",
+            state=tk.DISABLED
+        )
+        self.btn_cancel.pack(side=tk.RIGHT)
+
+        # Progress UI
+        self.progress_bar = ttk.Progressbar(actions_frame, mode='determinate', maximum=100)
+        self.progress_bar.pack(fill=tk.X, pady=(0, 5))
+
+        status_line = ttk.Frame(actions_frame)
+        status_line.pack(fill=tk.X)
+
+        self.lbl_progress = ttk.Label(status_line, text="Ready", font=Theme.FONT_NORMAL)
+        self.lbl_progress.pack(side=tk.LEFT)
+
+        self.btn_toggle_log = ttk.Button(
+            status_line, 
+            text="👁 Show Log", 
+            width=12,
+            command=self.toggle_log
+        )
+        self.btn_toggle_log.pack(side=tk.RIGHT)
+
+        # Collapsible Log Panel
+        self.log_visible = False
+        self.log_panel = scrolledtext.ScrolledText(
+            actions_frame, 
+            font=("Consolas", 9), 
+            height=8,
+            state=tk.DISABLED,
+            bg="#f8f9fa"
+        )
+        # Not packed initially
+
+    def toggle_log(self):
+        if self.log_visible:
+            self.log_panel.pack_forget()
+            self.btn_toggle_log.config(text="👁 Show Log")
+        else:
+            self.log_panel.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+            self.btn_toggle_log.config(text="👁 Hide Log")
+        self.log_visible = not self.log_visible
+
+    def log_index(self, msg, clear=False):
+        self.log_panel.config(state=tk.NORMAL)
+        if clear:
+            self.log_panel.delete(1.0, tk.END)
+        self.log_panel.insert(tk.END, msg + ("\n" if not msg.endswith("\n") else ""))
+        self.log_panel.see(tk.END)
+        self.log_panel.config(state=tk.DISABLED)
+
+    def cancel_op(self):
+        if self.maint_service.current_process:
+            if messagebox.askyesno("Cancel", "Cancel current operation?"):
+                self.cancelled = True
+                if self.maint_service.cancel_current_process():
+                    self.lbl_progress.config(text="Cancelled.")
+                    self.log_index("\n[CANCELLED] Process terminated by user.")
+                    self.btn_update.config(state=tk.NORMAL)
+                    self.btn_rebuild.config(state=tk.NORMAL)
+                    self.btn_cancel.config(state=tk.DISABLED)
+
+    def run_index_update(self, force=False):
+        """Run index update (incremental or force)"""
+        mode = "Rebuild" if force else "Update"
+        msg = "Rebuild vector index completely? This takes longer." if force else "Update index with changes? This is fast."
+        
+        if not messagebox.askyesno(f"Confirm {mode}", msg):
+            return
+
+        # Auto-expand log when starting
+        if not self.log_visible:
+            self.toggle_log()
+
+        self.btn_update.config(state=tk.DISABLED)
+        self.btn_rebuild.config(state=tk.DISABLED)
+        self.btn_cancel.config(state=tk.NORMAL)
+        self.cancelled = False
+
+        # Reset UI
+        self.progress_bar['value'] = 0
+        self.lbl_progress.config(text=f"Starting {mode}...")
+        self.log_index(f"--- Starting Index {mode} ({'Full' if force else 'Incremental'}) ---", clear=True)
+
+        start_time = time.time()
+
+        def update_progress(value, label_text):
+            self.progress_bar['value'] = value
+            self.lbl_progress.config(text=label_text)
+
+        def on_complete(success, message):
+            self.dashboard.root.after(0, lambda: self.btn_update.config(state=tk.NORMAL))
+            self.dashboard.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
+            self.dashboard.root.after(0, lambda: self.btn_cancel.config(state=tk.DISABLED))
+            
+            if success:
+                elapsed = time.time() - start_time
+                time_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{elapsed/60:.1f}m"
+                self.dashboard.root.after(0, lambda: update_progress(100, f"{mode} Complete! ({time_str})"))
+                self.dashboard.root.after(0, lambda: self.log_index(f"\n[SUCCESS] Index {mode} finished in {time_str}"))
+                self.dashboard.root.after(0, lambda: messagebox.showinfo("Success", f"Index {mode} Complete!"))
+            else:
+                if not self.cancelled:
+                    self.dashboard.root.after(0, lambda: update_progress(0, f"{mode} Failed"))
+                    self.dashboard.root.after(0, lambda m=message: self.log_index(f"\n[ERROR] {m}"))
+                    self.dashboard.root.after(0, lambda m=message: messagebox.showerror("Error", m))
+
+        def log_handler(line):
+            stripped = line.strip()
+            # 1. Update Log Panel
+            self.dashboard.root.after(0, lambda: self.log_index(stripped))
+            
+            # 2. Parse for progress
+            prog, label = parse_index_progress(stripped)
+            if prog is not None:
+                self.dashboard.root.after(0, lambda p=prog, l=label: update_progress(p, l))
+
+        # Use extracted command builder
+        args = get_rebuild_command(self.script_dir, force=force)
+
+        self.maint_service.run_task(
+            task_name=f"Index {mode}",
+            command=args,
+            callback=on_complete,
+            log_callback=log_handler
+        )
 
     def refresh_engine_list(self):
         self.engine_listbox.delete(0, tk.END)

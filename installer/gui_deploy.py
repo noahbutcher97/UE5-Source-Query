@@ -1378,7 +1378,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             
             # Use simplified copy logic similar to previous script
             # Copy ue5_query, config, tools, docs, tests, installer
-            for item in ["ue5_query", "config", "tools", "docs", "tests", "installer", "ask.bat", "launcher.bat", "bootstrap.py", "requirements.txt", ".indexignore", "pyproject.toml"]:
+            for item in ["ue5_query", "config", "tools", "docs", "tests", "installer", "ask.bat", "launcher.bat", "bootstrap.py", "requirements.txt", "requirements-gpu.txt", ".indexignore", "pyproject.toml"]:
                 src = self.source_dir / item
                 dst = target / item
                 if not src.exists():

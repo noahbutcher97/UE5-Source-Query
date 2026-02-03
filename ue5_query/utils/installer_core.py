@@ -141,7 +141,7 @@ class InstallerCore:
             pass
 
         # Manual copy of critical folders (simplified sync)
-        items_to_copy = ["ue5_query", "config", "tools", "docs", "tests", "installer", "ask.bat", "launcher.bat", "bootstrap.py", "requirements.txt", ".indexignore", "pyproject.toml"]
+        items_to_copy = ["ue5_query", "config", "tools", "docs", "tests", "installer", "ask.bat", "launcher.bat", "bootstrap.py", "requirements.txt", "requirements-gpu.txt", ".indexignore", "pyproject.toml"]
         
         for item in items_to_copy:
             src = self.source_dir / item

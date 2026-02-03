@@ -89,14 +89,19 @@ class EmbeddingProcessor:
         current_batch_size = self.batch_size
         cuda_error_count = 0
         
-        bar = tqdm(total=len(processed_texts), desc="Embedding chunks", unit="chunk") if tqdm else None
+        import sys
+        use_tqdm = tqdm and sys.stdout.isatty()
+        bar = tqdm(total=len(processed_texts), desc="Embedding chunks", unit="chunk") if use_tqdm else None
         
         i = 0
-        while i < len(processed_texts):
+        total_chunks = len(processed_texts)
+        last_print_time = time.time()
+
+        while i < total_chunks:
             batch = processed_texts[i:i + current_batch_size]
             
             try:
-                # Attempt encoding
+                # ... encoding ...
                 vecs = self.model.encode(
                     batch,
                     convert_to_numpy=True,
@@ -110,7 +115,13 @@ class EmbeddingProcessor:
                 # Success - reset error counters
                 cuda_error_count = 0
                 i += len(batch)
-                if bar: bar.update(len(batch))
+                
+                current_time = time.time()
+                if bar: 
+                    bar.update(len(batch))
+                elif (current_time - last_print_time) > 2.0:
+                    print(f"Embedding progress: {i}/{total_chunks} chunks ({(i/total_chunks)*100:.1f}%)", flush=True)
+                    last_print_time = current_time
 
             except (IndexError, RuntimeError) as e:
                 # Handle errors

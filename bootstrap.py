@@ -64,7 +64,26 @@ def main():
             input("\nPress Enter to exit...")
             sys.exit(1)
 
-    # 3. Launch Application
+    # 3. Dependency Check (Self-Healing)
+    try:
+        # Check for psutil (critical for maintenance ops)
+        subprocess.run([str(venv_python), "-c", "import psutil"], capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        print("[BOOTSTRAP] Missing dependencies detected. Updating environment...")
+        try:
+            # Prefer GPU requirements if available
+            req_file = root / "requirements-gpu.txt"
+            if not req_file.exists():
+                req_file = root / "requirements.txt"
+            
+            if req_file.exists():
+                print(f"[BOOTSTRAP] Installing from {req_file.name}...")
+                subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(req_file)], check=True)
+                print("[BOOTSTRAP] Dependencies updated.")
+        except Exception as e:
+            print(f"[WARN] Failed to update dependencies: {e}")
+
+    # 4. Launch Application
     print("[BOOTSTRAP] Initializing Dashboard...")
     
     # Construct command: venv_python -m module [args]

@@ -581,7 +581,8 @@ def build(incremental: bool, force: bool, use_index: bool, index_path: Path, roo
     new_texts, new_meta = [], []
     reused_embeddings, reused_meta = [], []
 
-    iterator = tqdm(files_with_origin, desc="Scanning files", unit="file") if tqdm else files_with_origin
+    use_tqdm = tqdm and not verbose and sys.stdout.isatty()
+    iterator = tqdm(files_with_origin, desc="Scanning files", unit="file") if use_tqdm else files_with_origin
     for file, origin in iterator:
         try:
             raw = file.read_text(encoding="utf-8", errors="ignore")

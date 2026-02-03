@@ -75,36 +75,14 @@ class MaintenanceTab:
         action_grid = tk.Frame(action_frame, bg=Theme.BG_LIGHT)
         action_grid.pack(fill=tk.X)
 
-        # Row 1: Index Management
-        tk.Label(
-            action_grid,
-            text="Index Management:",
-            font=("Arial", 10, "bold"),
-            bg=Theme.BG_LIGHT,
-            fg=Theme.TEXT_DARK
-        ).grid(row=0, column=0, sticky=tk.W, padx=(0, 20), pady=5)
-
-        self.btn_rebuild = tk.Button(
-            action_grid,
-            text="🔄 Rebuild Index",
-            command=self.rebuild_index,
-            bg=Theme.SECONDARY,
-            fg="white",
-            padx=15,
-            pady=8,
-            relief=tk.FLAT,
-            cursor="hand2"
-        )
-        self.btn_rebuild.grid(row=0, column=1, padx=5, pady=5)
-
-        # Row 2: System Updates (Phase 6)
+        # Row 1: System Updates (Phase 6)
         tk.Label(
             action_grid,
             text="System Updates:",
             font=("Arial", 10, "bold"),
             bg=Theme.BG_LIGHT,
             fg=Theme.TEXT_DARK
-        ).grid(row=1, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+        ).grid(row=0, column=0, sticky=tk.W, padx=(0, 20), pady=5)
 
         tk.Label(
             action_grid,
@@ -112,16 +90,16 @@ class MaintenanceTab:
             font=("Arial", 9),
             bg=Theme.BG_LIGHT,
             fg="#7F8C8D"
-        ).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
+        ).grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
 
-        # Row 3: Verification
+        # Row 2: Verification
         tk.Label(
             action_grid,
             text="Verification:",
             font=("Arial", 10, "bold"),
             bg=Theme.BG_LIGHT,
             fg=Theme.TEXT_DARK
-        ).grid(row=2, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+        ).grid(row=1, column=0, sticky=tk.W, padx=(0, 20), pady=5)
 
         btn_verify = tk.Button(
             action_grid,
@@ -134,29 +112,20 @@ class MaintenanceTab:
             relief=tk.FLAT,
             cursor="hand2"
         )
-        btn_verify.grid(row=2, column=1, padx=5, pady=5)
+        btn_verify.grid(row=1, column=1, padx=5, pady=5)
 
-        # Row 4: GPU/CUDA Setup (NEW)
+        # Row 3: GPU/CUDA Setup (NEW)
         tk.Label(
             action_grid,
             text="GPU Acceleration:",
             font=("Arial", 10, "bold"),
             bg=Theme.BG_LIGHT,
             fg=Theme.TEXT_DARK
-        ).grid(row=3, column=0, sticky=tk.W, padx=(0, 20), pady=5)
+        ).grid(row=2, column=0, sticky=tk.W, padx=(0, 20), pady=5)
 
         # GPU status frame
         gpu_status_frame = tk.Frame(action_grid, bg=Theme.BG_LIGHT)
-        gpu_status_frame.grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
-
-        self.gpu_status_label = tk.Label(
-            gpu_status_frame,
-            text="Checking...",
-            font=("Arial", 9),
-            bg=Theme.BG_LIGHT,
-            fg="#7F8C8D"
-        )
-        self.gpu_status_label.pack(side=tk.LEFT)
+        gpu_status_frame.grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
 
         self.btn_cuda_setup = tk.Button(
             gpu_status_frame,
@@ -374,15 +343,21 @@ class MaintenanceTab:
                         enable_setup = True
 
                     def update_ui():
-                        self.gpu_status_label.config(text=status, fg=color)
-                        self.btn_cuda_setup.config(state=tk.NORMAL if enable_setup else tk.DISABLED)
+                        try:
+                            self.gpu_status_label.config(text=status, fg=color)
+                            self.btn_cuda_setup.config(state=tk.NORMAL if enable_setup else tk.DISABLED)
+                        except AttributeError:
+                            pass # Widget might not exist yet or destroyed
 
                     # Store GPU info on dashboard for shared access if needed
                     self.dashboard.gpu_info = gpu_summary
                 else:
                     def update_ui():
-                        self.gpu_status_label.config(text="No NVIDIA GPU detected (CPU mode)", fg="#7F8C8D")
-                        self.btn_cuda_setup.config(state=tk.DISABLED)
+                        try:
+                            self.gpu_status_label.config(text="No NVIDIA GPU detected (CPU mode)", fg="#7F8C8D")
+                            self.btn_cuda_setup.config(state=tk.DISABLED)
+                        except AttributeError:
+                            pass
                     self.dashboard.gpu_info = None
 
                 self.dashboard.root.after(0, update_ui)
@@ -399,113 +374,6 @@ class MaintenanceTab:
                     pass
 
         threading.Thread(target=_check, daemon=True).start()
-
-    def rebuild_index(self):
-        if not messagebox.askyesno("Confirm", "Rebuild vector index? This may take 5-15 minutes."):
-            return
-
-        self.log_maint("Starting index rebuild...", clear=True)
-        self.btn_rebuild.config(state=tk.DISABLED)
-        self.btn_cancel.config(text="Cancel")
-        self.cancelled = False
-
-        # Reset progress bar
-        self.maint_progress['value'] = 0
-        self.maint_progress_label.config(text="Initializing...")
-        self.maint_time_label.config(text="Estimated time: calculating...")
-
-        start_time = time.time()
-
-        def update_progress(value, label_text):
-            """Update progress bar and label"""
-            self.maint_progress['value'] = value
-            self.maint_progress_label.config(text=label_text)
-
-            # Calculate time estimate
-            elapsed = time.time() - start_time
-            if value > 0:
-                estimated_total = elapsed / (value / 100)
-                remaining = estimated_total - elapsed
-                if remaining > 60:
-                    time_str = f"{remaining / 60:.1f} minutes remaining"
-                else:
-                    time_str = f"{remaining:.0f} seconds remaining"
-                self.maint_time_label.config(text=f"Elapsed: {elapsed:.0f}s | {time_str}")
-
-        def parse_progress(line):
-            """Parse build output to determine progress percentage"""
-            import re
-
-            # Progress stages and their percentage ranges
-            # Stage 1: Discovery (0-10%)
-            if "Discovering" in line or "Finding" in line:
-                return 5, "Discovering source files..."
-            if "Found" in line and "files" in line:
-                return 10, f"Discovered files: {line.strip()}"
-
-            # Stage 2: Chunking (10-30%)
-            if "Chunking" in line or "Processing" in line:
-                match = re.search(r'(\d+)/(\d+)', line)
-                if match:
-                    current, total = int(match.group(1)), int(match.group(2))
-                    progress = 10 + (current / total * 20) if total > 0 else 15
-                    return progress, f"Processing files ({current}/{total})..."
-                return 20, "Processing files..."
-
-            # Stage 3: Embedding generation (30-90%)
-            if "Embedding" in line or "batch" in line.lower():
-                match = re.search(r'(\d+)/(\d+)', line)
-                if match:
-                    current, total = int(match.group(1)), int(match.group(2))
-                    progress = 30 + (current / total * 60) if total > 0 else 60
-                    return progress, f"Generating embeddings ({current}/{total})..."
-                # Alternative progress pattern
-                match = re.search(r'(\d+)%', line)
-                if match:
-                    pct = int(match.group(1))
-                    progress = 30 + (pct * 0.6)
-                    return progress, f"Generating embeddings ({pct}%)..."
-                return 60, "Generating embeddings..."
-
-            # Stage 4: Saving (90-100%)
-            if "Saving" in line or "Writing" in line:
-                return 95, "Saving vector store..."
-            if "Complete" in line or "SUCCESS" in line or "Done" in line:
-                return 100, "Complete!"
-
-            return None, None
-
-        def on_complete(success, message):
-            self.dashboard.root.after(0, lambda: self.btn_rebuild.config(state=tk.NORMAL))
-            self.dashboard.root.after(0, lambda: self.btn_cancel.config(text="Close"))
-            if success:
-                self.dashboard.root.after(0, lambda: update_progress(100, "Index rebuild complete!"))
-                self.dashboard.root.after(0, lambda: self.log_maint("[SUCCESS] Index rebuild complete.", append=True))
-                self.dashboard.root.after(0, self.check_status)
-                
-                elapsed = time.time() - start_time
-                elapsed_str = f"{elapsed / 60:.1f} minutes" if elapsed > 60 else f"{elapsed:.0f} seconds"
-                self.dashboard.root.after(0, lambda e=elapsed_str: self.maint_time_label.config(text=f"Completed in {e}"))
-            else:
-                if not self.cancelled:
-                    self.dashboard.root.after(0, lambda: update_progress(0, "Failed"))
-                    self.dashboard.root.after(0, lambda m=message: self.log_maint(f"\n[ERROR] {m}", append=True))
-
-        def log_with_progress(line):
-            stripped = line.strip()
-            self.dashboard.root.after(0, lambda: self.log_maint(stripped, append=True))
-            
-            prog, label = parse_progress(stripped)
-            if prog is not None:
-                self.dashboard.root.after(0, lambda p=prog, l=label: update_progress(p, l))
-
-        script = self.script_dir / "tools" / "rebuild-index.bat"
-        self.maint_service.run_task(
-            task_name="Index Rebuild",
-            command=[str(script), "--verbose", "--force"],
-            callback=on_complete,
-            log_callback=log_with_progress
-        )
 
     def setup_cuda(self):
         """Launch CUDA setup wizard (Phase 6)"""
