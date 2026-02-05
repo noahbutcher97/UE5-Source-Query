@@ -44,7 +44,7 @@ class IntelligenceService:
         self.model = self.config.get("ANTHROPIC_MODEL", self.DEFAULT_MODEL)
 
         if not self.api_key or self.api_key == "your_api_key_here":
-            logger.info("No valid Anthropic API key found.")
+            logger.info("Anthropic API key not configured. AI features will be disabled.")
             return False
 
         try:

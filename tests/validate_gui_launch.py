@@ -29,7 +29,9 @@ def test_deployment_wizard():
         from installer.gui_deploy import DeploymentWizard
         wizard = DeploymentWizard(root)
         print("✓ PASS")
-        root.destroy()
+        root.update_idletasks()
+        root.after(100, wizard.destroy)
+        root.mainloop()
         return True
     except Exception as e:
         print(f"✗ FAIL: {e}")
@@ -48,7 +50,9 @@ def test_unified_dashboard():
         from ue5_query.management.gui_dashboard import UnifiedDashboard
         dashboard = UnifiedDashboard(root)
         print("✓ PASS")
-        root.destroy()
+        root.update_idletasks()
+        root.after(100, dashboard.destroy)
+        root.mainloop()
         return True
     except Exception as e:
         print(f"✗ FAIL: {e}")

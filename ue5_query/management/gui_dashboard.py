@@ -37,6 +37,7 @@ from ue5_query.management.views.deployment_tab import DeploymentManagerTab
 class UnifiedDashboard:
     def __init__(self, root):
         self.root = root
+        self._after_ids = {} # Track scheduled tasks for cleanup
         
         # Use Adaptive Layout Engine
         WindowManager.setup_window(
@@ -97,7 +98,37 @@ class UnifiedDashboard:
         self.update_service.start_check()
 
         # Check for first run (missing index)
-        self.root.after(1000, self._check_first_run)
+        self.safe_after(1000, self._check_first_run, 'first_run')
+
+    def safe_after(self, ms, func, name=None):
+        """Schedule a task and track it for cleanup"""
+        try:
+            if self.root.winfo_exists():
+                after_id = self.root.after(ms, func)
+                if name:
+                    self._after_ids[name] = after_id
+                return after_id
+        except (tk.TclError, AttributeError):
+            pass
+        return None
+
+    def cleanup(self):
+        """Cancel all pending background tasks"""
+        for task_name, after_id in self._after_ids.items():
+            try:
+                self.root.after_cancel(after_id)
+            except:
+                pass
+        self._after_ids.clear()
+
+    def destroy(self):
+        """Safely destroy the dashboard and its root window"""
+        self.cleanup()
+        try:
+            if self.root.winfo_exists():
+                self.root.destroy()
+        except:
+            pass
 
     def create_layout(self):
         # Header
@@ -222,7 +253,7 @@ class UnifiedDashboard:
             self.status_labels["ai"].config(fg="#F44336")
 
         # Schedule next check (every 3s)
-        self.root.after(3000, self.update_status_lights)
+        self.safe_after(3000, self.update_status_lights, 'status_lights')
 
     def _check_first_run(self):
         """Check if index is missing and guide user to build it"""

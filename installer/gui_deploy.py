@@ -34,6 +34,7 @@ from ue5_query.utils import gui_helpers
 class DeploymentWizard:
     def __init__(self, root):
         self.root = root
+        self._after_ids = {} # Track scheduled tasks for cleanup
         
         # Use Adaptive Layout Engine
         WindowManager.setup_window(
@@ -77,11 +78,11 @@ class DeploymentWizard:
         self.cancelled = False
 
         self.log_queue = queue.Queue()
-        self.root.after(100, self.process_log_queue)
+        self.safe_after(100, self.process_log_queue, 'log_queue')
         
         # Trigger actual detection if env var suggested GPU exists
         if pre_detected_gpu:
-            self.root.after(800, self.detect_gpu) # Small delay to let UI render first
+            self.safe_after(800, self.detect_gpu, 'gpu_detect') # Small delay to let UI render first
         
         self.load_default_engine_dirs()
         self.create_layout()
@@ -94,7 +95,37 @@ class DeploymentWizard:
         self.check_existing_install() 
         
         # Initial silent auto-detect to populate config if empty
-        self.root.after(500, lambda: self.auto_detect_engine(silent=True))
+        self.safe_after(500, lambda: self.auto_detect_engine(silent=True), 'auto_detect')
+
+    def safe_after(self, ms, func, name=None):
+        """Schedule a task and track it for cleanup"""
+        try:
+            if self.root.winfo_exists():
+                after_id = self.root.after(ms, func)
+                if name:
+                    self._after_ids[name] = after_id
+                return after_id
+        except (tk.TclError, AttributeError):
+            pass
+        return None
+
+    def cleanup(self):
+        """Cancel all pending background tasks"""
+        for task_name, after_id in self._after_ids.items():
+            try:
+                self.root.after_cancel(after_id)
+            except:
+                pass
+        self._after_ids.clear()
+
+    def destroy(self):
+        """Safely destroy the wizard and its root window"""
+        self.cleanup()
+        try:
+            if self.root.winfo_exists():
+                self.root.destroy()
+        except:
+            pass
 
     def get_tool_version(self):
         """Get version from ue5_query/__init__.py"""
@@ -480,7 +511,7 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
         self.gpu_support.trace_add("write", lambda *args: self.update_config_preview())
 
         # Initial preview update
-        self.root.after(500, self.update_config_preview)
+        self.safe_after(500, self.update_config_preview, 'config_preview')
 
     def update_config_preview(self):
         """Update the configuration preview panel with current settings."""
@@ -1815,9 +1846,10 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
                 msg = self.log_queue.get_nowait()
                 self.log_text.insert(tk.END, msg + "\n")
                 self.log_text.see(tk.END)
-        except queue.Empty:
+        except (queue.Empty, tk.TclError):
             pass
-        self.root.after(100, self.process_log_queue)
+        
+        self.safe_after(100, self.process_log_queue, 'log_queue')
 
 if __name__ == "__main__":
     root = tk.Tk()
