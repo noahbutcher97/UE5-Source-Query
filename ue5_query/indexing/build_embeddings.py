@@ -442,7 +442,7 @@ def load_cache() -> dict:
 def save_cache(cache: dict) -> None:
     CACHE_FILE.write_text(json.dumps(cache, indent=2))
 
-# embed_batches moved to src/indexing/processor.py
+# embed_batches moved to ue5_query/indexing/processor.py
 
 def is_index_stale(index_path: Path, root: Path) -> bool:
     if not index_path.exists():

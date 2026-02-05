@@ -12,7 +12,7 @@ REM
 REM Options:
 REM   --force          : Force rebuild even if index exists
 REM   --verbose        : Show detailed progress
-REM   --dirs-file FILE : Use custom directory list (default: src\indexing\EngineDirs.txt)
+REM   --dirs-file FILE : Use custom directory list (default: ue5_query\indexing\EngineDirs.txt)
 REM   --add-dir DIR    : Add specific directory to index
 REM   --batch-size N   : Override embedding batch size (1-64, default from .env)
 REM

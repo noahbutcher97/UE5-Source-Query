@@ -235,7 +235,7 @@ class TestImportHelper(unittest.TestCase):
         from ue5_query.utils.import_helper import try_import
 
         ConfigManager = try_import(
-            'src.utils.config_manager',
+            'ue5_query.utils.config_manager',
             'utils.config_manager',
             ['ConfigManager']
         )
@@ -247,7 +247,7 @@ class TestImportHelper(unittest.TestCase):
 
         # Import from query_intent (has multiple classes/enums)
         imports = try_import(
-            'src.core.query_intent',
+            'ue5_query.core.query_intent',
             'core.query_intent',
             ['QueryType', 'EntityType']
         )

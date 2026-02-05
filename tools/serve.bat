@@ -34,6 +34,6 @@ echo [*] Initializing engine (this takes 5-10 seconds)...
 echo [*] Press Ctrl+C to stop the server.
 echo.
 
-"%TOOL_ROOT%\.venv\Scripts\python.exe" "%TOOL_ROOT%\src\server\retrieval_server.py" --host 127.0.0.1 --port 8765
+"%TOOL_ROOT%\.venv\Scripts\python.exe" -m ue5_query.server.retrieval_server --host 127.0.0.1 --port 8765
 
 pause

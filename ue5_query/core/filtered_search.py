@@ -40,6 +40,27 @@ class FilteredSearch:
         if not self.is_enriched:
             logger.warning("Metadata not enriched. Filtering will be limited.")
 
+        # --- High-Impact Optimization: Pre-compute boolean masks ---
+        # This moves filtering from O(N) Python loop to O(N) C/NumPy bitwise ops
+        N = len(metadata)
+        self.mask_uprop = np.zeros(N, dtype=bool)
+        self.mask_uclass = np.zeros(N, dtype=bool)
+        self.mask_ufunc = np.zeros(N, dtype=bool)
+        self.mask_ustruct = np.zeros(N, dtype=bool)
+        self.mask_header = np.zeros(N, dtype=bool)
+        self.mask_impl = np.zeros(N, dtype=bool)
+        self.mask_origin_engine = np.zeros(N, dtype=bool)
+        
+        # We iteration once at startup, saving millions of checks later
+        for i, m in enumerate(metadata):
+            if m.get('has_uproperty'): self.mask_uprop[i] = True
+            if m.get('has_uclass'): self.mask_uclass[i] = True
+            if m.get('has_ufunction'): self.mask_ufunc[i] = True
+            if m.get('has_ustruct'): self.mask_ustruct[i] = True
+            if m.get('is_header'): self.mask_header[i] = True
+            if m.get('is_implementation'): self.mask_impl[i] = True
+            if m.get('origin', 'engine') == 'engine': self.mask_origin_engine[i] = True
+
     def search(
         self,
         query_vec: np.ndarray,
@@ -78,67 +99,131 @@ class FilteredSearch:
             file_type: 'header' or 'implementation'
             boost_entities: List of entities to boost in ranking
             boost_macros: Boost chunks with UE5 macros
+            use_logical_boosts: Enable rule-based ranking improvements
             query_text: Raw query text for keyword/sparse scoring boost
+            query_type: Classification of the user query
 
         Returns:
             List of results with scores
         """
-        # Calculate base similarity scores (Dense Score)
-        scores = self.embeddings @ query_vec
+        # 1. Apply Vectorized Filters (Fast)
+        mask = np.ones(len(self.metadata), dtype=bool)
+        
+        if origin == 'engine': mask &= self.mask_origin_engine
+        elif origin == 'project': mask &= ~self.mask_origin_engine
+            
+        if has_uproperty is not None: mask &= (self.mask_uprop == has_uproperty)
+        if has_uclass is not None: mask &= (self.mask_uclass == has_uclass)
+        if has_ufunction is not None: mask &= (self.mask_ufunc == has_ufunction)
+        if has_ustruct is not None: mask &= (self.mask_ustruct == has_ustruct)
+        
+        if file_type == 'header': mask &= self.mask_header
+        elif file_type == 'implementation': mask &= self.mask_impl
 
-        # Apply filters
-        valid_indices = self._apply_filters(
-            entity=entity,
-            entity_type=entity_type,
-            origin=origin,
-            has_uproperty=has_uproperty,
-            has_uclass=has_uclass,
-            has_ufunction=has_ufunction,
-            has_ustruct=has_ustruct,
-            file_type=file_type
-        )
+        # Get indices passing vector filters
+        candidate_indices = np.where(mask)[0]
+        
+        # 2. Apply Python Filters (Slower, only on candidates)
+        # Filters that are hard to vectorize (list containment)
+        valid_indices = []
+        if entity or entity_type:
+            for idx in candidate_indices:
+                meta = self.metadata[idx]
+                
+                # Entity filter
+                if entity:
+                    if entity not in meta.get('entities', []):
+                        continue
+                        
+                # Entity type filter
+                if entity_type:
+                    if entity_type not in meta.get('entity_types', []):
+                        continue
+                        
+                valid_indices.append(idx)
+        else:
+            valid_indices = candidate_indices.tolist()
+
+        if not valid_indices:
+            return []
+
+        # 3. Calculate Scores (Subset Optimization)
+        # Compute dot product ONLY for valid indices
+        # This saves significant FLOPs if filtering reduced the set
+        subset_embeddings = self.embeddings[valid_indices]
+        scores = subset_embeddings @ query_vec
 
         # Apply sparse scoring (Keyword Boost)
         if query_text:
             sparse_scores = self._calculate_sparse_score(query_text, valid_indices)
-            # Combine: Dense + 0.3 * Sparse
-            # This ensures strong keyword matches bubble up
-            for i, idx in enumerate(valid_indices):
-                scores[idx] += sparse_scores[i]
+            scores += sparse_scores
 
         # Apply boosting
-        if boost_entities or boost_macros:
-            scores = self._apply_boosting(
-                scores,
-                boost_entities=boost_entities,
-                boost_macros=boost_macros
-            )
-
-        # Apply logical boosts (compensate for poor model)
-        if use_logical_boosts and boost_entities:
-            scores = self._apply_logical_boosts(
-                scores,
-                boost_entities=boost_entities,
-                query_type=query_type
-            )
-
-        # Filter scores to valid indices
-        filtered_scores = np.full_like(scores, -np.inf)
-        filtered_scores[valid_indices] = scores[valid_indices]
-
-        # Get top-k
-        top_indices = np.argsort(-filtered_scores)[:top_k]
-
-        # Build results
+        # Note: We need to map scores back to metadata indices for logic
+        # OR run boosting on the subset
+        
+        # Build intermediate result list for boosting/sorting
         results = []
-        for idx in top_indices:
-            if filtered_scores[idx] > -np.inf:  # Only include valid results
-                result = self.metadata[idx].copy()
-                result['score'] = float(filtered_scores[idx])
-                results.append(result)
+        for i, idx in enumerate(valid_indices):
+            score = scores[i]
+            meta = self.metadata[idx]
+            
+            # Apply Boosting Logic (Logic from _apply_boosting merged here for efficiency)
+            boost_factor = 1.0
+            
+            if boost_entities:
+                entities = meta.get('entities', [])
+                if any(e in entities for e in boost_entities):
+                    boost_factor *= 1.2
 
-        return results
+            if boost_macros:
+                # We can check pre-computed masks!
+                if (self.mask_uprop[idx] or self.mask_ufunc[idx] or 
+                    self.mask_uclass[idx] or self.mask_ustruct[idx]):
+                    boost_factor *= 1.15
+            
+            score *= boost_factor
+            
+            # Apply Logical Boosts
+            if use_logical_boosts and boost_entities and self.is_enriched:
+                # 1. File Path Matching
+                for ent in boost_entities:
+                    entity_base = ent.lstrip('FUAE')
+                    path_lower = Path(meta['path']).name.lower()
+                    if entity_base.lower() in path_lower:
+                        score *= 3.0
+                        break
+                
+                # 2. Header Prioritization
+                if query_type in ['definition', 'hybrid']:
+                    if self.mask_header[idx]: score *= 2.5
+                    elif self.mask_impl[idx]: score *= 0.5
+                
+                # 3. Entity Co-occurrence
+                entities = meta.get('entities', [])
+                if not any(e in entities for e in boost_entities):
+                    score *= 0.1
+                    
+                # 4. Multi-entity bonus
+                if len(entities) > 3:
+                    score *= 1.3
 
+            results.append((score, idx))
+
+        # Sort by score desc
+        results.sort(key=lambda x: x[0], reverse=True)
+        
+        # Return formatted top-k
+        final_output = []
+        for score, idx in results[:top_k]:
+            item = self.metadata[idx].copy()
+            item['score'] = float(score)
+            final_output.append(item)
+            
+        return final_output
+
+    # Removed _apply_filters and _apply_boosting helpers as they are now inlined/vectorized
+    
     def _calculate_sparse_score(self, query: str, indices: List[int]) -> np.ndarray:
         """
         Calculate sparse (keyword) score for selected indices.
@@ -371,7 +456,7 @@ def main():
 
     if not meta_path.exists():
         print(f"Enriched metadata not found at: {meta_path}")
-        print("Run: python src/indexing/metadata_enricher.py data/vector_meta.json")
+        print("Run: python -m ue5_query.indexing.metadata_enricher data/vector_meta.json")
         return
 
     embeddings = np.load(vectors_path, mmap_mode="r", allow_pickle=False)["embeddings"]

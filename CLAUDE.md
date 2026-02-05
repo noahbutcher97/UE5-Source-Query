@@ -32,65 +32,38 @@ This file provides guidance to Claude Code when working with the UE5 Source Quer
 
 ```
 D:\DevTools\UE5-Source-Query\
-├── src/
+├── ue5_query/
 │   ├── core/                    # Query processing (Phases 1-5)
 │   │   ├── hybrid_query.py      # Main hybrid query engine
 │   │   ├── query_intent.py      # Query type detection
 │   │   ├── definition_extractor.py  # Regex-based C++ extraction
-│   │   ├── filtered_search.py   # Metadata-based filtering (Phase 2)
-│   │   ├── filter_builder.py    # Filter DSL builder (Phase 2)
+│   │   ├── filtered_search.py   # Metadata-based filtering
 │   │   ├── batch_query.py       # Batch processing (Phase 4)
 │   │   ├── relationship_extractor.py  # Relationship extraction (Phase 5)
-│   │   ├── output_formatter.py  # Result formatting (Phase 3)
-│   │   └── query_engine.py      # Semantic search
+│   │   ├── query_engine.py      # Semantic search
+│   │   └── types.py             # Type definitions
 │   ├── indexing/                # Vector store building
 │   │   ├── build_embeddings.py  # Main indexing script
 │   │   ├── detect_engine_path.py  # UE5 path detection
 │   │   ├── metadata_enricher.py # Entity detection & tagging
-│   │   ├── EngineDirs.txt       # 24 targeted UE5 directories
-│   │   └── BuildSourceIndex.ps1 # PowerShell indexer (deprecated)
+│   │   └── EngineDirs.txt       # 24 targeted UE5 directories
 │   ├── utils/                   # Utilities & helpers
-│   │   ├── semantic_chunker.py  # C++ structure-aware chunking
 │   │   ├── config_manager.py    # Configuration management
-│   │   ├── source_manager.py    # Source directory manager (Phase 3)
-│   │   ├── verify_installation.py  # Health checks (Phase 2)
-│   │   └── verify_vector_store.py  # Vector validation (Phase 2)
+│   │   └── activity_logger.py   # M2M activity tracking
 │   ├── management/              # GUI tools (Phase 3)
 │   │   └── gui_dashboard.py     # Unified Dashboard
-│   └── server/                  # HTTP API (optional)
-│       └── retrieval_server.py  # REST API server
-├── installer/                   # Deployment (Phase 2)
-│   └── gui_deploy.py            # GUI installer wizard
-├── tools/                       # Backend scripts (Phase 3)
-│   ├── health-check.bat         # System validation
-│   ├── rebuild-index.bat        # Index rebuilding
-│   ├── fix-paths.bat            # Path regeneration
-│   └── serve.bat                # HTTP server launcher
-├── examples/                    # Example files (Phase 4)
-│   ├── sample_batch_queries.jsonl
-│   └── batch_results.jsonl
-├── data/
-│   ├── vector_store.npz         # Embeddings (768-dim, ~24MB)
-│   ├── vector_meta.json         # Chunk metadata (~3.9MB)
-│   └── vector_meta_enriched.json  # With entity tags (optional)
-├── docs/                        # Documentation (organized)
-│   ├── Production/              # User documentation
-│   │   ├── PROJECT_STRUCTURE.md
-│   │   ├── MAINTENANCE.md
-│   │   ├── TROUBLESHOOTING.md
-│   │   ├── Deployment/          # DEPLOYMENT.md, TEAM_SETUP.md
-│   │   ├── GPU/                 # GPU_SETUP.md, GPU_SUPPORT.md
-│   │   ├── GUI/                 # GUI_TOOLS.md
-│   │   └── UsageGuide/          # HYBRID_QUERY_GUIDE.md, AI_AGENT_GUIDE.md
-│   ├── Development/             # Development docs
-│   │   ├── ProjectAudits/       # Audit reports
-│   │   └── ProjectPlans/        # Phase plans (5, 6, etc.)
-│   └── _archive/                # Obsolete documentation
-├── .indexignore                 # Default exclusion patterns
+│   └── server/                  # HTTP API
+│       └── retrieval_server.py  # REST API (Migrating to FastAPI)
+├── docs/                        # Documentation
+│   ├── user/                    # User guides & audits
+│   │   ├── audits/              # v2.1 Audit Reports (2026-02-04)
+│   │   └── ai_integration.md    # Agent guide
+│   └── dev/                     # Developer docs
+├── data/                        # Vector store & index
 ├── Setup.bat                    # Main installer
 ├── launcher.bat                 # Unified Dashboard launcher
 ├── ask.bat                      # CLI query interface
-└── README.md                    # User documentation
+└── README.md                    # Main readme
 ```
 
 ## Core Architecture
@@ -149,144 +122,31 @@ Vector Store
 
 ### Indexing System
 
-**`src/indexing/build_embeddings.py`** (Main indexing script)
-- **Lines 87-100**: `DEFAULT_UE5_EXCLUDES` - Default exclusion patterns
-- **Lines 102-108**: `should_exclude_path()` - Directory exclusion logic
-- **Lines 110-129**: `load_dirs_from_file()` - Load EngineDirs.txt
-- **Lines 131-163**: `load_exclusions_from_file()` - Load .indexignore patterns
-- **Lines 165-196**: `load_all_indexignore_files()` - Hierarchical .indexignore loading
-- **Lines 247-295**: `discover_source_files()` - Unified file discovery
-- **Lines 409-533**: `build()` - Main indexing function with 4 input modes
-- **Lines 531-660**: `main()` - CLI argument parsing
-
-**Important CLI Arguments:**
-- `--dirs-file <path>`: Load directories from file (RECOMMENDED for targeted indexing)
-- `--dirs <path1> <path2>`: Scan specific directories
-- `--extensions .cpp .h`: Filter by file extensions
-- `--exclude <pattern>`: Add directory exclusion patterns
-- `--exclude-files <pattern>`: Exclude files by glob pattern
-- `--indexignore <path>`: Load specific .indexignore file
-- `--incremental`: Reuse cached embeddings for unchanged files
-- `--force`: Force full rebuild
-- `--verbose`: Enable detailed logging
-
-**`src/indexing/EngineDirs.txt`** (24 targeted directories)
-- Chaos Vehicle Plugin
-- Physics Control Plugin
-- Animation systems (Core, Graph, Runtime)
-- Physics Engine
-- Networking (Replication, Sockets)
-- Vehicle-specific subsystems
-
-**`.indexignore`** (Exclusion patterns)
-- Format similar to `.gitignore`
-- Directory patterns (plain text): `Intermediate`, `Binaries`
-- File patterns (glob): `*Test*.cpp`, `*.generated.h`
-- Hierarchical loading: current dir → root dirs → `~/.indexignore`
+**`ue5_query/indexing/build_embeddings.py`** (Main indexing script)
+- **File Discovery**: Extension filter (.cpp, .h), exclusions (Intermediate), and glob matching.
+- **Chunking**: Semantic chunking (structure-aware) or fallback character-based.
+- **Embedding**: Generates vectors using `unixcoder-base`.
 
 ### Query System
 
-**`src/core/hybrid_query.py`** (Main query interface)
-- Automatic query type detection
-- Routes to definition extractor or semantic search
-- Merges results intelligently
+**`ue5_query/core/hybrid_query.py`** (Main query interface)
+- Orchestrates intent analysis, definition extraction, and semantic search.
+- Merges results into a unified schema.
 
-**`src/core/query_intent.py`** (Query analysis)
-- Detects UE5 entities (FHitResult, AActor, UChaos*)
-- Classifies as DEFINITION/SEMANTIC/HYBRID
-- Enhances queries with code keywords
+**`ue5_query/core/query_intent.py`** (Query analysis)
+- Detects UE5 entities and classifies query type (DEFINITION/SEMANTIC/HYBRID).
 
-**`src/core/definition_extractor.py`** (Precise extraction)
-- Regex patterns for struct/class/enum/function
-- Brace matching for complete definitions
-- Fuzzy matching with Levenshtein distance
-- 0.3-0.4s response time
-
-**`src/core/filtered_search.py`** (Metadata filtering)
-- Filter by entity, type, UE5 macros
-- Relevance boosting (entity matching, macro presence)
-- Requires enriched metadata (run `metadata_enricher.py`)
-
-### Utilities
-
-**`src/utils/semantic_chunker.py`** (Structure-aware chunking)
-- Splits at C++ boundaries:
-  - Function/class/struct/enum definitions
-  - UE5 macros (UCLASS, USTRUCT, UPROPERTY, UFUNCTION)
-  - Namespace declarations
-  - Comment blocks
-- Configurable via environment:
-  - `SEMANTIC_CHUNKING=1` (default: ON)
-  - `CHUNK_SIZE=2000` (default for semantic)
-  - `CHUNK_OVERLAP=200`
-
-## Development Workflow
+### Development Workflow
 
 ### Building the Index
-
-**Recommended: Targeted indexing with EngineDirs.txt**
 ```bash
-cd D:\DevTools\UE5-Source-Query
-.venv\Scripts\python.exe src/indexing/build_embeddings.py \
-    --dirs-file src/indexing/EngineDirs.txt \
-    --force --verbose
+python -m ue5_query.indexing.build_embeddings --dirs-file ue5_query.indexing.EngineDirs.txt --force
 ```
-
-**Result:** ~2,255 files from 24 directories, ~20,000-30,000 chunks, 2-5 minute build time
-
-**Alternative: Full Engine scan with exclusions**
-```bash
-.venv\Scripts\python.exe src/indexing/build_embeddings.py \
-    --root "C:/Program Files/Epic Games/UE_5.3/Engine" \
-    --force --verbose
-```
-
-**Result:** ~50,000-80,000 files after exclusions, 20-30 minute build time
-
-**Incremental updates (add new directories):**
-```bash
-# Edit EngineDirs.txt to add 2 new directories
-.venv\Scripts\python.exe src/indexing/build_embeddings.py \
-    --dirs-file src/indexing/EngineDirs.txt \
-    --incremental --verbose
-```
-
-**Only new files are embedded, unchanged files reused from cache**
 
 ### Querying the Index
-
-**Via Unified Dashboard (Recommended - Phase 3):**
 ```bash
-launcher.bat
-# Opens GUI with tabs for:
-# - Query: Interactive search with real-time results
-# - Source Manager: Add/remove source directories
-# - Maintenance: Rebuild index, verify installation
-# - Diagnostics: Health checks, path verification
-```
-
-**Via CLI batch file:**
-```bash
-ask.bat "FHitResult ImpactPoint ImpactNormal" --copy --dry-run --top-k 3
-```
-
-**Via Python script:**
-```bash
-python src/core/hybrid_query.py "FHitResult members" --show-reasoning
-python src/core/hybrid_query.py "how does collision detection work" --show-reasoning
-python src/core/definition_extractor.py struct FHitResult
-```
-
-**Via Batch Processing (Phase 4):**
-```bash
-python src/core/batch_query.py --input examples/sample_batch_queries.jsonl --output batch_results.jsonl
-```
-
-**Via HTTP server (optional):**
-```bash
-tools\serve.bat
-# OR: python src/server/retrieval_server.py
-# Query: http://localhost:8008/query?q=FHitResult+members
+ask.bat "FHitResult members" --show-reasoning
+python -m ue5_query.core.hybrid_query "how does collision detection work"
 ```
 
 ## Configuration
@@ -368,7 +228,7 @@ cd D:\DevTools\UE5-Source-Query
 
 ### Add New Directories to Index
 
-1. Edit `src/indexing/EngineDirs.txt`:
+1. Edit `ue5_query/indexing/EngineDirs.txt`:
 ```txt
 # Add new line
 C:\Program Files\Epic Games\UE_5.3\Engine\Source\Runtime\YourNewDir
@@ -376,15 +236,15 @@ C:\Program Files\Epic Games\UE_5.3\Engine\Source\Runtime\YourNewDir
 
 2. Run incremental build:
 ```bash
-python src/indexing/build_embeddings.py --dirs-file src/indexing/EngineDirs.txt --incremental --verbose
+python ue5_query/indexing/build_embeddings.py --dirs-file ue5_query/indexing/EngineDirs.txt --incremental --verbose
 ```
 
 ### Exclude Specific File Patterns
 
 **Option 1: CLI (temporary)**
 ```bash
-python src/indexing/build_embeddings.py \
-    --dirs-file src/indexing/EngineDirs.txt \
+python ue5_query/indexing/build_embeddings.py \
+    --dirs-file ue5_query/indexing/EngineDirs.txt \
     --exclude-files "*Test*.cpp" "*Mock*.h" \
     --force --verbose
 ```
@@ -401,23 +261,23 @@ python src/indexing/build_embeddings.py \
 
 1. **Check query intent classification:**
 ```bash
-python src/core/query_intent.py
+python ue5_query/core/query_intent.py
 # Interactive mode - test query classification
 ```
 
 2. **Test definition extraction:**
 ```bash
-python src/core/definition_extractor.py struct FHitResult --fuzzy
+python ue5_query/core/definition_extractor.py struct FHitResult --fuzzy
 ```
 
 3. **View raw semantic results:**
 ```bash
-python src/core/query_engine.py "your query" --dry-run --top-k 10
+python ue5_query/core/query_engine.py "your query" --dry-run --top-k 10
 ```
 
 4. **Enable verbose hybrid query:**
 ```bash
-python src/core/hybrid_query.py "your query" --show-reasoning --top-k 10
+python ue5_query/core/hybrid_query.py "your query" --show-reasoning --top-k 10
 ```
 
 ## Performance Characteristics
@@ -461,49 +321,32 @@ python src/core/hybrid_query.py "your query" --show-reasoning --top-k 10
 
 ## Current Status & Future Work
 
-**Current Status: Phase 5 Complete**
-- ✅ Phase 1: Core hybrid query system
-- ✅ Phase 2: Filter DSL and deployment infrastructure
-- ✅ Phase 3: Unified Dashboard GUI
-- ✅ Phase 4: Batch query processing
-- ✅ Phase 5: Relationship extraction
+**Current Status: v2.1 Foundations (Post-Audit)**
+- ✅ Phase 1-5: Complete (Core, Filters, GUI, Batch, Relationships)
+- ✅ v2.1 Audits: Complete (API, DB, Patterns, System)
 
-**🎯 ACTIVE TASK: GUI Feature Parity (Phases B & C)**
+**🎯 ACTIVE TASK: Infrastructure Refactor (v2.1)**
+Refactoring the system for production readiness based on the 2026-02-04 Audit Summary.
 
-**Status:** Ready to begin (15 hours estimated)
-**Quick Start:** See `docs/Development/NEXT_SESSION_QUICKSTART.md`
-**Full Plan:** See plan file `lively-foraging-minsky.md` in Claude's plan directory
-
-**What's Complete:**
-- ✅ Phase A: Shared GUI Infrastructure (6/6 tasks)
-- ✅ Phase D: Distribution Optimization (6/6 tasks)
-- ✅ Bug fixes and testing complete
-- ✅ All changes committed and pushed
-
-**What's Next:**
-- ⏸️ Phase B: Deployment Wizard Enhancements (0/4 tasks, 8.5h)
-  1. Priority-based engine detection
-  2. Health score display in version selector
-  3. Version mismatch warnings
-  4. SourceManager integration
-- ⏸️ Phase C: Unified Dashboard Enhancements (0/3 tasks, 6.5h)
-  1. Progress bars for long operations
-  2. Configuration preview
-  3. CUDA setup button
+**Priority Goals:**
+1.  **FastAPI Migration**: Asynchronous server implementation.
+2.  **SQLite Migration**: Transition from JSON metadata to relational DB.
+3.  **Redis Caching**: Semantic result caching layer.
+4.  **Celery Integration**: Decoupled background indexing.
 
 **To Continue:**
-Tell Claude: "Continue with Phase B from NEXT_SESSION_QUICKSTART.md"
+Refer to `docs/user/audits/Audit_Summary_2026-02-04.md` for the 80-item prioritized task list.
 
----
+## Contributing
 
-**Next Phase: Phase 6 - Environment Detection**
-See `docs/Development/ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md` for details.
+### Code Style
+- Python 3.10+, Type hints mandatory.
+- Use `ue5_query.` package imports (no relative imports).
+- Follow the **Template Method** pattern for extractors (v2.1 requirement).
 
-**Deferred Enhancements:**
-See `docs/_archive/planning/DEFERRED_TASKS.md` for older planned enhancements:
-1. Smart incremental cleanup for removed directories
-2. Project-scope separate embedded store
-3. Query strategy auto-selection
+### Commit Messages
+Use conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`.
+**Important:** No AI attribution in commit messages. Keep them focused on "why" and "what".
 
 ## Troubleshooting
 
@@ -549,8 +392,8 @@ See `docs/_archive/planning/DEFERRED_TASKS.md` for older planned enhancements:
 ```bash
 python -c "
 from pathlib import Path
-from src.indexing.build_embeddings import load_dirs_from_file, discover_source_files
-roots = load_dirs_from_file(Path('src/indexing/EngineDirs.txt'), verbose=True)
+from ue5_query.indexing.build_embeddings import load_dirs_from_file, discover_source_files
+roots = load_dirs_from_file(Path('ue5_query/indexing/EngineDirs.txt'), verbose=True)
 files = discover_source_files(roots=roots, verbose=True)
 print(f'Found {len(files)} files')
 "
@@ -558,25 +401,31 @@ print(f'Found {len(files)} files')
 
 **Test query intent:**
 ```bash
-python src/core/query_intent.py
+python ue5_query/core/query_intent.py
 # Interactive mode
 ```
 
 **Test definition extraction:**
 ```bash
-python src/core/definition_extractor.py struct FHitResult
-python src/core/definition_extractor.py class AActor
-python src/core/definition_extractor.py enum ECollisionChannel
+python ue5_query/core/definition_extractor.py struct FHitResult
+python ue5_query/core/definition_extractor.py class AActor
+python ue5_query/core/definition_extractor.py enum ECollisionChannel
 ```
 
 **Test semantic search:**
 ```bash
-python src/core/query_engine.py "collision detection" --dry-run --top-k 5
+python ue5_query/core/query_engine.py "collision detection" --dry-run --top-k 5
 ```
 
 **Test hybrid query:**
 ```bash
-python src/core/hybrid_query.py "FHitResult members" --show-reasoning
+python ue5_query/core/hybrid_query.py "FHitResult members" --show-reasoning
+```
+
+**Test AI Agent Integration:**
+```bash
+# Verifies JSON, XML, and Code output formats used by Claude/Gemini
+python tests/test_agent_integration.py
 ```
 
 ## Integration with Other Projects
@@ -646,25 +495,19 @@ refactor: simplify file discovery logic
 
 ## Additional Resources
 
-### User Documentation (docs/Production/)
-- **README.md**: Main user guide
-- **PROJECT_STRUCTURE.md**: Complete file organization reference
-- **MAINTENANCE.md**: System maintenance procedures
-- **TROUBLESHOOTING.md**: Common issues and solutions
-- **UsageGuide/HYBRID_QUERY_GUIDE.md**: Detailed query system guide
-- **UsageGuide/AI_AGENT_GUIDE.md**: AI agent integration guide
-- **Deployment/DEPLOYMENT.md**: Deployment strategies
-- **Deployment/TEAM_SETUP.md**: Team onboarding guide
-- **GPU/GPU_SETUP.md**: GPU configuration guide
-- **GUI/GUI_TOOLS.md**: Unified Dashboard documentation
+### User & Deployment Documentation (docs/user/ & docs/deployment/)
+- **README.md**: Main user guide.
+- **docs/dev/architecture.md**: System architecture and file reference.
+- **docs/deployment/maintenance.md**: System maintenance procedures.
+- **docs/user/troubleshooting.md**: Common issues and solutions.
+- **docs/user/ai_integration.md**: AI agent integration protocol.
+- **docs/deployment/team_setup.md**: Team onboarding and Git LFS guide.
 
-### Development Documentation (docs/Development/)
-- **ProjectAudits/AUDIT_REPORT.md**: System performance audit
-- **ProjectAudits/INTEGRATION_AUDIT.md**: Phase 1-4 integration audit
-- **ProjectPlans/PHASE_5_RELATIONSHIP_EXTRACTION.md**: Phase 5 plan
-- **ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md**: Phase 6 plan
+### Development Documentation (docs/dev/ & docs/user/audits/)
+- **docs/user/audits/Audit_Summary_2026-02-04.md**: v2.1 infrastructure plan.
+- **docs/dev/api_reference.md**: Python API reference.
+- **docs/dev/BACKLOG.md**: Future features and optimizations.
 
 ### Archived Documentation (docs/_archive/)
-- **planning/DEFERRED_TASKS.md**: Older planned enhancements
-- **planning/IMPROVEMENT_ROADMAP.md**: Superseded enhancement timeline
-- **audits/**: Historical audit reports
+- **docs/_archive/planning/**: Obsolete plans and roadmap history.
+- **docs/_archive/audits/**: Historical audit reports.

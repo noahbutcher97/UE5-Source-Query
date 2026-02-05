@@ -4,270 +4,113 @@
 
 | Task | Command | Description |
 |------|---------|-------------|
-| **GUI Management** | `manage.bat` | Launch graphical management tool |
-| **Update Installation** | `update.bat [target_dir]` | Update existing installation with latest code |
-| **Reconfigure** | `configure.bat` | Re-run configuration wizard |
-| **Rebuild Index** | `rebuild-index.bat [--force] [--verbose]` | Rebuild entire vector store |
-| **Add Directory** | `add-directory.bat <dir> [--verbose]` | Incrementally add directory to index |
-| **Manage Directories** | `manage-directories.bat list/add/remove/rebuild` | Manage indexed directories |
+| **Unified Dashboard** | `launcher.bat` | One-stop GUI for query, sources, and maintenance |
+| **Update Code** | `update.bat` | Update existing installation with latest code |
+| **Full Setup** | `Setup.bat` | Re-run environment setup and configuration |
+| **Rebuild Index** | `rebuild-index.bat` | CLI tool to rebuild the entire vector store |
+| **Health Check** | `health-check.bat` | System validation and diagnostic tool |
 
-## GUI Management Tool
+## GUI Management Tool (Dashboard)
 
-The easiest way to manage your installation:
+The Unified Dashboard is the primary way to manage your installation:
 
 ```bash
-manage.bat
-# or
-manage-directories.bat gui
+launcher.bat
 ```
 
 ### Features:
-- **Configuration Tab**: Edit API key, vector store location, models
-- **Directories Tab**: Add/remove indexed directories with file browser
-- **Actions Tab**: Rebuild index, update installation, run wizard
-- **Output Log**: Real-time feedback from operations
+- **Query Tab**: Live search with semantic and definition filtering.
+- **Config Tab**: Edit API keys, models, and indexing parameters.
+- **Sources Tab**: Visual management of indexed UE5 and project directories.
+- **Maintenance Tab**: Quick access to index rebuilds and updates.
+- **Diagnostics Tab**: Deep system checks (GPU, paths, versions).
 
 ## Command-Line Tools
 
 ### 1. Update Installation
 
-Updates source files from main repository while preserving configuration and data:
+Updates source files from the main repository while preserving your data:
 
 ```bash
 # Update current directory
 update.bat
-
-# Update specific installation
-update.bat "D:\YourProject\Scripts\UE5-Source-Query"
 ```
 
 **What it does:**
-- ✅ Backs up existing `.env` configuration
-- ✅ Updates all source files (Python scripts, batch files)
-- ✅ Updates dependencies if requirements.txt changed
-- ✅ Preserves vector store data
-- ✅ Preserves configuration
+- ✅ Backs up existing `.env` configuration.
+- ✅ Updates all source files (`ue5_query/` package).
+- ✅ Re-verifies dependencies in the virtual environment.
+- ✅ Preserves your existing vector store.
 
-### 2. Reconfigure Installation
+### 2. Full Setup / Reconfigure
 
-Re-run the configuration wizard:
+Re-run the setup wizard to fix environment issues or change core settings:
 
 ```bash
-configure.bat
+Setup.bat
 ```
 
 **When to use:**
-- Change API key
-- Switch embedding models (requires index rebuild)
-- Change vector store location
-- Reconfigure from scratch
+- Change Anthropic API key.
+- Switch embedding models.
+- Re-detect Unreal Engine installation.
+- Fix a broken virtual environment.
 
-### 3. Rebuild Vector Index
+### 3. Rebuild Vector Index (CLI)
 
-Rebuild the entire vector store from UE5 engine source:
+Perform a full rebuild of the vector store from the command line:
 
 ```bash
-# Basic rebuild (prompts for confirmation)
-rebuild-index.bat
-
-# Force rebuild without confirmation
-rebuild-index.bat --force
-
-# Verbose output with progress
+# Location: tools/rebuild-index.bat
 rebuild-index.bat --force --verbose
-
-# Use custom directory list
-rebuild-index.bat --dirs-file "custom_dirs.txt" --force
 ```
 
-**Timing:**
-- With GPU (RTX 5090): 2-3 minutes
-- CPU only: 30-40 minutes
-
-### 4. Add Directory Incrementally
-
-Add a new directory to existing index without full rebuild:
-
-```bash
-# Add single directory
-add-directory.bat "C:/Program Files/Epic Games/UE_5.3/Engine/Source/Runtime/Physics"
-
-# With verbose output
-add-directory.bat "D:/CustomEngine/Source" --verbose
-```
-
-**Use cases:**
-- Add custom engine modifications
-- Include third-party plugins
-- Add project-specific source code
-
-###  5. Manage Indexed Directories
-
-Persistent directory management with configuration file:
-
-```bash
-# List all configured directories
-manage-directories.bat list
-
-# Add directory to configuration
-manage-directories.bat add "C:/Path/To/Source"
-
-# Remove directory from configuration
-manage-directories.bat remove "C:/Path/To/Source"
-
-# Rebuild from configured directories
-manage-directories.bat rebuild --verbose
-
-# Launch GUI
-manage-directories.bat gui
-```
-
-**Configuration file:** `config/indexed_directories.txt`
+---
 
 ## Common Workflows
 
-### Adding New Engine Modules
+### Adding New Source Directories
 
-```bash
-# Method 1: Quick incremental add
-add-directory.bat "C:/Program Files/Epic Games/UE_5.3/Engine/Plugins/Runtime/Metasound"
-
-# Method 2: Add to config and rebuild later
-manage-directories.bat add "C:/Program Files/Epic Games/UE_5.3/Engine/Plugins/Runtime/Metasound"
-manage-directories.bat rebuild
-```
+Use the **Sources** tab in the Dashboard (`launcher.bat`). It allows you to browse for folders and persists them to the internal configuration.
 
 ### Switching Embedding Models
 
-```bash
-# 1. Reconfigure to change model
-configure.bat
-# Select new embedding model (e.g., all-MiniLM-L6-v2)
+1. Run **Setup.bat** to select the new model (e.g., `all-MiniLM-L6-v2`).
+2. Run **rebuild-index.bat --force** to generate new embeddings compatible with that model.
 
-# 2. Rebuild index with new model
-rebuild-index.bat --force --verbose
-```
+### Updating After System Changes
 
-### Updating After Main Repo Changes
-
-```bash
-# 1. Update installation
-update.bat
-
-# 2. Reconfigure if needed (optional)
-configure.bat
-
-# 3. Rebuild if indexing logic changed (optional)
-rebuild-index.bat --force
-```
-
-### Setting Up New Project Installation
-
-```bash
-# From main repo directory
-cd D:\DevTools\UE5-Source-Query
-install.bat "D:\NewProject" --gpu --build-index
-
-# Configure
-cd "D:\NewProject\Scripts\UE5-Source-Query"
-configure.bat
-
-# Customize indexed directories
-manage-directories.bat gui
-```
-
-## Configuration Files
-
-### config/.env
-Main configuration file (created by `configure.bat`):
-```ini
-ANTHROPIC_API_KEY=your_key_here
-VECTOR_OUTPUT_DIR=D:\...\data
-PYTHONPATH=D:\...\. venv\Lib\site-packages
-EMBED_MODEL=microsoft/unixcoder-base
-ANTHROPIC_MODEL=claude-3-haiku-20240307
-```
-
-### config/indexed_directories.txt
-Persistent directory list (managed by `manage-directories.bat`):
-```
-C:/Program Files/Epic Games/UE_5.3/Engine/Source/Runtime
-C:/Program Files/Epic Games/UE_5.3/Engine/Source/Editor
-D:/CustomEngine/Source
-```
-
-### src/indexing/EngineDirs.txt
-Default UE5 engine directories for indexing (predefined list).
+If you move your Unreal Engine installation or update to a new version:
+1. Run **Setup.bat** to re-detect the paths.
+2. Rebuild the index from the Dashboard or CLI.
 
 ## Troubleshooting
 
 ### "Configuration not found" Error
-
-```bash
-# Run configuration wizard
-configure.bat
-```
+Run **Setup.bat** to regenerate your `.env` file.
 
 ### "Virtual environment not found" Error
-
-```bash
-# Reinstall from main repo
-cd D:\DevTools\UE5-Source-Query
-install.bat "D:\YourProject"
-```
+Run **Setup.bat** to recreate the `.venv` directory and install dependencies.
 
 ### Dimension Mismatch Errors
-
-Occurs when embedding model changes but index wasn't rebuilt:
-
-```bash
-# Check current model in config/.env
-# Then rebuild index
-rebuild-index.bat --force
-```
+This happens when your index was built with a different model than the one currently selected. 
+**Fix**: Run `rebuild-index.bat --force`.
 
 ### GUI Won't Launch
-
+Check if `tkinter` is available:
 ```bash
-# Check if tkinter is available
 .venv\Scripts\python.exe -c "import tkinter"
-
-# If error, tkinter not installed with Python
-# Reinstall Python with tkinter support
 ```
-
-### Index Build Fails
-
-```bash
-# Check logs
-type logs\*.log
-
-# Verify directories exist
-manage-directories.bat list
-
-# Try with verbose output
-rebuild-index.bat --force --verbose
-```
-
-## Best Practices
-
-1. **Regular Updates**: Run `update.bat` monthly to get latest improvements
-2. **Backup Configuration**: Keep a copy of `config/.env` before major changes
-3. **Incremental Additions**: Use `add-directory.bat` for single directories instead of full rebuild
-4. **Directory Management**: Use `config/indexed_directories.txt` to track custom additions
-5. **GPU Acceleration**: Always use `--gpu` flag during installation for 10-15x faster indexing
-6. **Version Control**: Add `config/.env` to `.gitignore` (contains API key)
 
 ## Performance Tips
 
-- **GPU Acceleration**: Install with `--gpu` for 2-3 minute rebuilds vs 30-40 minutes CPU
-- **Incremental Updates**: Use `add-directory.bat` instead of full rebuilds when possible
-- **Selective Indexing**: Only index directories you actually query (edit `src/indexing/EngineDirs.txt`)
-- **Model Selection**: `all-MiniLM-L6-v2` (384-dim) is faster but less accurate than `unixcoder-base` (768-dim)
+- **GPU Acceleration**: Ensure an NVIDIA GPU is detected in the **Diagnostics** tab for 15x faster builds.
+- **Selective Indexing**: Only index the UE5 modules you actually use (manage this in the **Sources** tab).
+- **Batch Sizing**: Adjust batch size in the **Config** tab if you encounter VRAM issues on older cards.
 
 ## Getting Help
 
-- Documentation: `docs/` directory
-- Deployment Guide: `docs/DEPLOYMENT.md`
-- Main README: `README.md`
-- Report Issues: https://github.com/YourOrg/UE5-Source-Query/issues
+- **Architecture**: `docs/dev/architecture.md`.
+- **API Reference**: `docs/dev/api_reference.md`.
+- **Agent Integration**: `docs/user/ai_integration.md`.
+- **Issues**: https://github.com/YourOrg/UE5-Source-Query/issues

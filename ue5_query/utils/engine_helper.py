@@ -61,7 +61,7 @@ def get_available_engines(script_dir: Path, use_cache: bool = True):
 
 def _legacy_detection(script_dir: Path):
     """Legacy detection using detect_engine_path.py (fallback)"""
-    detect_script = script_dir / "src" / "indexing" / "detect_engine_path.py"
+    detect_script = script_dir / "ue5_query" / "indexing" / "detect_engine_path.py"
 
     # Ensure script exists
     if not detect_script.exists():

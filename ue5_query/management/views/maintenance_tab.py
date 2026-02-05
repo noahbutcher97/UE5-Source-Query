@@ -287,7 +287,7 @@ class MaintenanceTab:
     def verify_installation(self):
         """Run comprehensive installation verification using MaintenanceService"""
         self.log_maint("Running installation verification...", clear=True)
-        verify_script = self.script_dir / "src" / "utils" / "verify_installation.py"
+        verify_script = self.script_dir / "ue5_query" / "utils" / "verify_installation.py"
         # Adjust path if in installed package structure
         if not verify_script.exists():
              # Try alternate location

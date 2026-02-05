@@ -35,7 +35,7 @@ health-check.bat --verbose
 2. During installation, check "Add Python to PATH"
 3. Restart your command prompt
 4. Verify: `python --version`
-5. Re-run: `configure.bat`
+5. Re-run: `Setup.bat`
 
 **Alternative**: Use `py` launcher (Windows):
 ```bash
@@ -51,7 +51,7 @@ py -m venv .venv
 
 **Quick Fix**:
 ```bash
-configure.bat
+Setup.bat
 ```
 
 **Manual Fix**:
@@ -101,7 +101,7 @@ pip install sentence-transformers --no-cache-dir
 deactivate
 ```
 
-**Alternative**: Delete `.venv` and re-run `configure.bat`.
+**Alternative**: Delete `.venv` and re-run `Setup.bat`.
 
 ---
 
@@ -118,7 +118,7 @@ dir config\.env
 
 2. If missing, run:
 ```bash
-configure.bat
+Setup.bat
 ```
 
 3. If exists, open `config/.env` in a text editor and add:
@@ -188,7 +188,7 @@ E:\UE5-Custom\Engine
 
 ### Error: "Template file not found"
 
-**Cause**: `src/indexing/EngineDirs.template.txt` is missing.
+**Cause**: `ue5_query/indexing/EngineDirs.template.txt` is missing.
 
 **This is a critical error** - the template should always be in version control.
 
@@ -201,12 +201,12 @@ git clone <repository-url> UE5-Query-Fresh
 
 2. Or restore from Git:
 ```bash
-git checkout HEAD -- src/indexing/EngineDirs.template.txt
+git checkout HEAD -- ue5_query/indexing/EngineDirs.template.txt
 ```
 
 3. Or manually re-run installation:
 ```bash
-install.bat
+Setup.bat
 ```
 
 ---
@@ -219,12 +219,12 @@ install.bat
 
 1. Restore from Git:
 ```bash
-git checkout HEAD -- src/indexing/EngineDirs.template.txt
+git checkout HEAD -- ue5_query/indexing/EngineDirs.template.txt
 ```
 
 2. Verify placeholder exists:
 ```bash
-findstr "{ENGINE_ROOT}" src\indexing\EngineDirs.template.txt
+findstr "{ENGINE_ROOT}" ue5_query\indexing\EngineDirs.template.txt
 ```
 
 3. If restoration fails, contact team lead for clean template.
@@ -239,12 +239,12 @@ findstr "{ENGINE_ROOT}" src\indexing\EngineDirs.template.txt
 
 1. Check file size:
 ```bash
-dir src\indexing\EngineDirs.template.txt
+dir ue5_query\indexing\EngineDirs.template.txt
 ```
 
 2. If file is 0 bytes or very small, restore from Git:
 ```bash
-git checkout HEAD -- src/indexing/EngineDirs.template.txt
+git checkout HEAD -- ue5_query/indexing/EngineDirs.template.txt
 ```
 
 3. Verify restoration:
@@ -303,7 +303,7 @@ health-check.bat
 
 1. Check file contents:
 ```bash
-type src\indexing\EngineDirs.txt
+type ue5_query\indexing\EngineDirs.txt
 ```
 
 2. If empty or has only comments, regenerate:
@@ -313,7 +313,7 @@ fix-paths.bat
 
 3. If regeneration fails, the template may be corrupted:
 ```bash
-git checkout HEAD -- src/indexing/EngineDirs.template.txt
+git checkout HEAD -- ue5_query/indexing/EngineDirs.template.txt
 fix-paths.bat
 ```
 
@@ -333,7 +333,7 @@ This is usually a WARNING, not an ERROR. It means:
 - Not a blocker - tool will index what exists
 
 **To resolve** (optional):
-1. Edit `src/indexing/EngineDirs.txt` manually
+1. Edit `ue5_query/indexing/EngineDirs.txt` manually
 2. Comment out non-existent paths with `#`
 3. Save and rebuild:
 ```bash
@@ -511,7 +511,7 @@ ask.bat "FVector"
 3. Check what's indexed:
 ```bash
 # Verify vector store has content
-.venv\Scripts\python src\utils\verify_vector_store.py --verbose
+.venv\Scripts\python ue5_query\utils\verify_vector_store.py --verbose
 ```
 
 4. If very few chunks indexed (< 1000):
@@ -543,7 +543,7 @@ ask.bat "FVector"
    dir data\vector_store.npz
    ```
    - If > 100 MB, consider indexing fewer directories
-   - Edit `src/indexing/EngineDirs.txt` to remove non-essential paths
+   - Edit `ue5_query/indexing/EngineDirs.txt` to remove non-essential paths
 
 3. **API timeout**:
    - Check internet connection
@@ -591,7 +591,7 @@ ask.bat "test query" --verbose
    - Run: `rebuild-index.bat`
 
 2. Or exclude problematic directories:
-   - Edit `src/indexing/EngineDirs.txt`
+   - Edit `ue5_query/indexing/EngineDirs.txt`
    - Comment out restricted paths with `#`
    - Rebuild: `rebuild-index.bat --force`
 
@@ -611,7 +611,7 @@ ask.bat "test query" --verbose
 1. **Close other applications** to free RAM
 
 2. **Index fewer directories**:
-   - Edit `src/indexing/EngineDirs.txt`
+   - Edit `ue5_query/indexing/EngineDirs.txt`
    - Comment out non-essential paths (e.g., Plugins)
    - Keep only core Engine/Source directories
    - Rebuild: `rebuild-index.bat --force`
@@ -640,7 +640,7 @@ ask.bat "test query" --verbose
 
 1. Verify `EngineDirs.txt` has correct paths:
 ```bash
-type src\indexing\EngineDirs.txt
+type ue5_query\indexing\EngineDirs.txt
 ```
 
 2. Manually check a path exists:
@@ -675,7 +675,7 @@ dir /s "C:\Program Files\Epic Games\UE_5.3\Engine\Source\Runtime\Core\*.h"
    - Network drive: 30+ minutes (not recommended)
 
 2. **Reduce scope**:
-   - Edit `src/indexing/EngineDirs.txt`
+   - Edit `ue5_query/indexing/EngineDirs.txt`
    - Keep only directories you actually query (e.g., Core, CoreUObject, Engine)
 
 3. **Check CPU usage**:
@@ -710,7 +710,7 @@ ask.bat "AActor SetActorLocation"
 ```
 
 3. **Rebuild with better chunking** (advanced):
-   - Edit `src/indexing/build_embeddings.py`
+   - Edit `ue5_query/indexing/build_embeddings.py`
    - Adjust `CHUNK_SIZE` parameter (default: 1000 chars)
    - Smaller chunks = more precise, but larger index
 
@@ -733,7 +733,7 @@ type .gitignore
 ```
 .venv/
 config/.env
-src/indexing/EngineDirs.txt
+ue5_query/indexing/EngineDirs.txt
 data/vector_store.npz
 data/vector_meta.json
 ```
@@ -775,7 +775,7 @@ git commit -m "Stop tracking .venv"
 
 1. Accept either version (doesn't matter):
 ```bash
-git checkout --theirs src/indexing/EngineDirs.txt
+git checkout --theirs ue5_query/indexing/EngineDirs.txt
 ```
 
 2. Regenerate for your machine:
@@ -785,8 +785,8 @@ fix-paths.bat
 
 3. Ensure `.gitignore` blocks it:
 ```bash
-git check-ignore src/indexing/EngineDirs.txt
-# Should output: src/indexing/EngineDirs.txt
+git check-ignore ue5_query/indexing/EngineDirs.txt
+# Should output: ue5_query/indexing/EngineDirs.txt
 ```
 
 ---
@@ -829,7 +829,7 @@ Currently, the tool skips files it can't decode. This error shouldn't block inde
 
 If you see this and indexing stops:
 1. Note which file caused the error
-2. Open `src/indexing/build_embeddings.py`
+2. Open `ue5_query/indexing/build_embeddings.py`
 3. Find the error handling for file reading
 4. Ensure it has `errors='ignore'` or `errors='replace'`
 
@@ -850,7 +850,7 @@ ask.bat "your query"
 ```
 
 2. **Bypass SSL verification** (NOT recommended for production):
-   - Edit `src/core/hybrid_query.py`
+   - Edit `ue5_query/core/hybrid_query.py`
    - Add `verify=False` to API calls
    - This is a security risk - only use on trusted networks
 
@@ -892,7 +892,7 @@ health-check.bat --verbose
 
 2. **Vector store check**:
 ```bash
-.venv\Scripts\python src\utils\verify_vector_store.py --verbose
+.venv\Scripts\python ue5_query\utils\verify_vector_store.py --verbose
 ```
 
 3. **Test query with verbose output**:
@@ -942,7 +942,7 @@ To avoid most issues:
 health-check.bat --verbose
 
 # Fix virtual environment
-configure.bat
+Setup.bat
 
 # Fix engine paths
 fix-paths.bat
@@ -951,7 +951,7 @@ fix-paths.bat
 rebuild-index.bat --force
 
 # Test vector store
-.venv\Scripts\python src\utils\verify_vector_store.py
+.venv\Scripts\python ue5_query\utils\verify_vector_store.py
 
 # Test query with details
 ask.bat "test" --verbose

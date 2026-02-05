@@ -75,11 +75,10 @@ installer\install_cli.bat "C:\Deploy\UE5-Query" --gpu --build-index
 The deployment process copies:
 
 1. **Source Code**
-   - `src/core/` - Query engine
-   - `src/indexing/` - Vector store building
-   - `src/utils/` - Health checks and validation
-   - `src/management/` - GUI manager
-
+   - `ue5_query/core/` - Query engine
+   - `ue5_query/indexing/` - Vector store building
+   - `ue5_query/utils/` - Health checks and validation
+   - `ue5_query/management/` - GUI manager
 2. **Documentation**
    - `docs/*.md` - All guides
 

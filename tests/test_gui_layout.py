@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import tkinter as tk
 
-# Add src to path
+# Add project root to path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -30,7 +30,7 @@ class TestGUIPrefs(unittest.TestCase):
 
     def test_load_defaults(self):
         """Test default values when no config exists"""
-        with patch("src.utils.gui_layout.GUIPrefs.__init__", return_value=None) as mock_init:
+        with patch("ue5_query.utils.gui_layout.GUIPrefs.__init__", return_value=None) as mock_init:
             # We mock init to avoid the real path logic, but we need to set the paths manually
             prefs = GUIPrefs()
             prefs.config_dir = self.config_dir
@@ -42,7 +42,7 @@ class TestGUIPrefs(unittest.TestCase):
             # Actually, let's just patch the Path inside __init__ to point to our test dir
             pass
 
-    @patch("src.utils.gui_layout.Path")
+    @patch("ue5_query.utils.gui_layout.Path")
     def test_prefs_loading(self, mock_path):
         """Test loading from .env and json"""
         # Setup mock paths
@@ -68,7 +68,7 @@ class TestGUIPrefs(unittest.TestCase):
             data = json.load(f)
             self.assertEqual(data['text_scale'], 2.0)
 
-    @patch("src.utils.gui_layout.Path")
+    @patch("ue5_query.utils.gui_layout.Path")
     def test_env_precedence(self, mock_path):
         """Ensure .env takes precedence over defaults"""
         mock_path.return_value.parent.parent.parent = self.test_dir
@@ -90,7 +90,7 @@ class TestLayoutMetrics(unittest.TestCase):
     def tearDown(self):
         LayoutMetrics._instance = None
 
-    @patch("src.utils.gui_layout.GUIPrefs")
+    @patch("ue5_query.utils.gui_layout.GUIPrefs")
     def test_initialization(self, mock_prefs_cls):
         """Test metrics calculation at 1.0 scale"""
         mock_prefs = mock_prefs_cls.return_value
@@ -106,7 +106,7 @@ class TestLayoutMetrics(unittest.TestCase):
         self.assertEqual(metrics.FONT_S, 9)
         self.assertEqual(metrics.PAD_M, 16)
 
-    @patch("src.utils.gui_layout.GUIPrefs")
+    @patch("ue5_query.utils.gui_layout.GUIPrefs")
     def test_high_dpi_scaling(self, mock_prefs_cls):
         """Test metrics calculation at high DPI (1.5x)"""
         mock_prefs = mock_prefs_cls.return_value
@@ -138,7 +138,7 @@ class TestLayoutMetrics(unittest.TestCase):
         
         pass
 
-    @patch("src.utils.gui_layout.GUIPrefs")
+    @patch("ue5_query.utils.gui_layout.GUIPrefs")
     def test_text_scaling(self, mock_prefs_cls):
         """Test user text scaling preference"""
         mock_prefs = mock_prefs_cls.return_value

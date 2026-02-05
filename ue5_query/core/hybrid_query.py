@@ -662,12 +662,63 @@ def main():
     parser.add_argument("--scope", choices=["engine", "project", "all"], default="engine", help="Search scope (default: engine)")
     parser.add_argument("--model", default=None, help="Override embedding model name")
     parser.add_argument("--use-reranker", action="store_true", help="Enable re-ranking (slower, higher precision)")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Enter interactive shell mode")
 
     args = parser.parse_args()
 
     # Handle Introspection
     if args.describe:
         print_tool_schema()
+        sys.exit(0)
+
+    # Interactive Mode
+    if args.interactive:
+        print("="*60)
+        print(" UE5 Source Query - Interactive Mode")
+        print(" Type 'exit' or 'quit' to stop.")
+        print("="*60)
+        
+        try:
+            # Initialize once
+            print("[INFO] Loading models... ", end="", flush=True)
+            engine = HybridQueryEngine(TOOL_ROOT)
+            print("Ready.\n")
+            
+            while True:
+                try:
+                    q = input("Query> ").strip()
+                    if q.lower() in ('exit', 'quit'):
+                        break
+                    if not q: continue
+                    
+                    t0 = time.time()
+                    res = engine.query(
+                        question=q,
+                        top_k=args.top_k,
+                        dry_run=args.dry_run,
+                        show_reasoning=args.show_reasoning,
+                        scope=args.scope,
+                        embed_model_name=args.model,
+                        use_reranker=args.use_reranker,
+                        pattern=args.pattern,
+                        extensions=args.extensions
+                    )
+                    
+                    if args.json:
+                        print(json.dumps(res, indent=2))
+                    else:
+                        print_results(res, show_reasoning=args.show_reasoning)
+                        print(f"\n[Took {time.time()-t0:.2f}s]")
+                        
+                except KeyboardInterrupt:
+                    print("\nInterrupted. Type 'exit' to quit.")
+                except Exception as e:
+                    print(f"[ERROR] {e}")
+                    
+        except Exception as e:
+            print(f"[FATAL] Failed to initialize engine: {e}")
+            sys.exit(1)
+            
         sys.exit(0)
 
     if not args.question:

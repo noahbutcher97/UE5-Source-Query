@@ -9,7 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Add src to path
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ue5_query.management.gui_dashboard import UnifiedDashboard

@@ -33,7 +33,12 @@ python -m ue5_query.utils.gpu_test
 ```
 
 ## 2. Server API (Programmatic Control)
-For high-performance integration, run the persistent retrieval server.
+For high-performance integration, run the persistent retrieval server. 
+
+**Why use the server?**
+- **Zero Latency:** Avoids the 5-10 second "cold start" overhead of loading large embedding models (PyTorch) for every query.
+- **Caching:** Keeps the vector index in RAM for instant sub-second retrieval.
+- **Robustness:** Handles index errors gracefully (returns 503 instead of crashing).
 
 **Start Server:**
 ```bash
@@ -85,7 +90,7 @@ Request the specific implementation code.
 ask.bat "PhysSlide" --format code --max-lines 50
 ```
 
-## 3. Semantic Exit Codes
+## 5. Semantic Exit Codes
 The CLI returns the following exit codes:
 
 - **0**: Success (Results found)
@@ -93,7 +98,7 @@ The CLI returns the following exit codes:
 - **2**: No Results Found (Query returned empty)
 - **3**: Configuration Error (Index missing, Engine path invalid)
 
-## 4. Batch Processing
+## 6. Batch Processing
 If an agent plans to run multiple queries (e.g., investigating a complex bug), use batch mode to load the model once.
 
 **Input (`queries.jsonl`):**

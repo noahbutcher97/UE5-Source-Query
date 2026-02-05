@@ -14,8 +14,8 @@ import threading
 import queue
 import json
 
-# Add src to path to import utils
-# This assumes installer/ is sibling to src/
+# Add project root to path to import package modules
+# This assumes installer/ is sibling to ue5_query/
 SCRIPT_DIR = Path(__file__).parent.parent
 sys.path.append(str(SCRIPT_DIR))
 
@@ -1688,18 +1688,32 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             self.btn_install.config(state=tk.NORMAL)
             self.btn_cancel.config(text="Close")
 
+    def get_git_hash(self):
+        """Get current commit hash"""
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=self.source_dir,
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if res.returncode == 0:
+                return res.stdout.strip()
+        except:
+            pass
+        return "unknown"
+
     def _create_deployment_config(self, target: Path):
         """
         Create .ue5query_deploy.json for smart update system.
-
-        This allows deployed installations to pull updates from local dev repo
-        or remote GitHub repository.
         """
         import datetime
 
         # Detect if source is a git repo (for remote URL detection)
         remote_repo = "https://github.com/yourusername/UE5-Source-Query.git"  # Default
         branch = "master"
+        git_hash = self.get_git_hash()
 
         try:
             # Try to get git remote URL from source repo
@@ -1727,23 +1741,36 @@ Create Shortcut: {'Yes' if self.create_shortcut.get() else 'No'}
             # If git detection fails, use defaults
             pass
 
-        # Load exclusions from centralized config
-        exclude_patterns = [
-            ".venv", ".git", "__pycache__", "*.pyc", "*.pyo", "*.pyd", 
-            ".pytest_cache", ".coverage", "*.log", ".DS_Store", "Thumbs.db"
-        ]
+        # Load exclusions (Centralized > Config > Fallback)
+        try:
+            from ue5_query.core.constants import DEFAULT_EXCLUDES, DEPLOYMENT_EXCLUDES
+            exclude_patterns = DEFAULT_EXCLUDES + DEPLOYMENT_EXCLUDES
+        except ImportError as e:
+            # Robust Fallback with Notification
+            self.log(f"⚠ Warning: Could not load core constants: {e}")
+            self.log("  Using built-in fallback exclusion patterns.")
+            exclude_patterns = [
+                ".venv", ".git", "__pycache__", "*.pyc", "*.pyo", "*.pyd", 
+                ".pytest_cache", ".coverage", "*.log", ".DS_Store", "Thumbs.db"
+            ]
+        
+        # Validate
+        if not exclude_patterns:
+             self.log("! CRITICAL: Exclusion list empty. Update may be unsafe.")
         
         try:
             rules_path = self.source_dir / "config" / "deployment_rules.json"
             if rules_path.exists():
                 with open(rules_path, 'r') as f:
                     rules = json.load(f)
-                    exclude_patterns = rules.get("default_excludes", []) + rules.get("deployment_excludes", [])
+                    # Merge rules if available
+                    exclude_patterns = list(set(exclude_patterns + rules.get("default_excludes", []) + rules.get("deployment_excludes", [])))
         except Exception as e:
             self.log(f"Warning: Failed to load deployment rules: {e}")
 
         config = {
             "version": self.get_tool_version(),
+            "git_hash": git_hash,
             "deployment_info": {
                 "deployed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "deployed_from": str(self.source_dir),

@@ -6,7 +6,7 @@ from pathlib import Path
 enriched_path = Path("data/vector_meta_enriched.json")
 if not enriched_path.exists():
     print("[ERROR] Enriched metadata not found!")
-    print("Run: python src/indexing/metadata_enricher.py")
+    print("Run: python -m ue5_query.indexing.metadata_enricher")
     exit(1)
 
 with open(enriched_path) as f:
@@ -60,4 +60,4 @@ if len(chunks_with_entities) > len(items) * 0.1:  # At least 10% enriched
     print("  ✓ FilteredSearch can use entity boosting")
 else:
     print("  ⚠ Low enrichment rate - may need to rebuild enrichment")
-    print("  Run: python src/indexing/metadata_enricher.py")
+    print("  Run: python -m ue5_query.indexing.metadata_enricher")

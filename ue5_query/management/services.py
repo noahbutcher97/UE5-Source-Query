@@ -137,7 +137,7 @@ class UpdateService:
                 local_repo = manager.config.get("update_sources", {}).get("local_dev_repo")
                 if local_repo:
                     local_path = Path(local_repo)
-                    if local_path.exists() and (local_path / "src" / "__init__.py").exists():
+                    if local_path.exists() and (local_path / "ue5_query" / "__init__.py").exists():
                         local_version = get_version(local_path)
                         available_sources.append({'type': 'local', 'path': str(local_path), 'version': local_version or 'unknown'})
                         log(f"  [LOCAL] {local_path}")

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
-# Add src to path
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ue5_query.utils.environment_detector import (

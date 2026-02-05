@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# Add src to path
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ue5_query.utils.engine_helper import get_available_engines, resolve_uproject_source
@@ -28,7 +28,7 @@ class TestGetAvailableEngines(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch('src.utils.engine_helper.get_detector')
+    @patch('ue5_query.utils.engine_helper.get_detector')
     def test_returns_dict_format(self, mock_get_detector):
         """Test that get_available_engines returns proper dict format"""
         # Mock detector
@@ -56,7 +56,7 @@ class TestGetAvailableEngines(unittest.TestCase):
         self.assertIn("source", result[0])
         self.assertIn("health_score", result[0])
 
-    @patch('src.utils.engine_helper.get_detector')
+    @patch('ue5_query.utils.engine_helper.get_detector')
     def test_uses_cache_by_default(self, mock_get_detector):
         """Test that cache is used by default"""
         mock_detector = MagicMock()
@@ -70,7 +70,7 @@ class TestGetAvailableEngines(unittest.TestCase):
         call_args = mock_detector.detect_engines.call_args
         self.assertTrue(call_args.kwargs.get('use_cache', True))
 
-    @patch('src.utils.engine_helper.get_detector')
+    @patch('ue5_query.utils.engine_helper.get_detector')
     def test_can_disable_cache(self, mock_get_detector):
         """Test that cache can be disabled"""
         mock_detector = MagicMock()
@@ -82,7 +82,7 @@ class TestGetAvailableEngines(unittest.TestCase):
         call_args = mock_detector.detect_engines.call_args
         self.assertFalse(call_args.kwargs.get('use_cache'))
 
-    @patch('src.utils.engine_helper.get_detector')
+    @patch('ue5_query.utils.engine_helper.get_detector')
     def test_handles_detection_failure(self, mock_get_detector):
         """Test graceful handling of detection failure"""
         mock_get_detector.side_effect = Exception("Detection failed")

@@ -20,8 +20,6 @@ import sys, os, json, time, argparse, subprocess
 import numpy as np
 from pathlib import Path
 from functools import lru_cache
-from sentence_transformers import SentenceTransformer
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
 from ue5_query.utils.logger import get_project_logger
@@ -49,6 +47,7 @@ _MODEL = None
 def get_model(name: str):
     global _MODEL
     if _MODEL is None or getattr(_MODEL, "_name", "") != name:
+        from sentence_transformers import SentenceTransformer
         _MODEL = SentenceTransformer(name)
         _MODEL._name = name
     return _MODEL
@@ -195,6 +194,7 @@ def query(question: str, top_k: int, embed_model_name: str, api_model_name: str,
         raise SystemExit("ANTHROPIC_API_KEY missing (check .env).")
 
     t4 = time.perf_counter()
+    from anthropic import Anthropic
     client = Anthropic(api_key=api_key)
     resp = client.messages.create(
         model=api_model_name,

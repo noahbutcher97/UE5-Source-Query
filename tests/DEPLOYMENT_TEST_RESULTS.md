@@ -17,14 +17,14 @@
 ### Test 1.1: Import Tests (Dev Repo)
 ```bash
 cd D:\DevTools\UE5-Source-Query
-.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'src'); from src.utils.config_manager import ConfigManager; print('SUCCESS')"
+.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'ue5_query'); from ue5_query.utils.config_manager import ConfigManager; print('SUCCESS')"
 ```
 **Result**: ✅ PASS - ConfigManager imports with absolute path
 
 ### Test 1.2: Hybrid Query Execution (Dev Repo)
 ```bash
 cd D:\DevTools\UE5-Source-Query
-.venv\Scripts\python.exe src\core\hybrid_query.py FHitResult --top-k 1
+.venv\Scripts\python.exe ue5_query\core\hybrid_query.py FHitResult --top-k 1
 ```
 **Result**: ✅ PASS - Definition extraction successful
 - Found 5 results including FHitResult, FkHitResult, FSATResult
@@ -33,7 +33,7 @@ cd D:\DevTools\UE5-Source-Query
 ### Test 1.3: CLI Client (Dev Repo)
 ```bash
 cd D:\DevTools\UE5-Source-Query
-.venv\Scripts\python.exe src\utils\cli_client.py FHitResult --top-k 1
+.venv\Scripts\python.exe ue5_query\utils\cli_client.py FHitResult --top-k 1
 ```
 **Result**: ✅ PASS - CLI executes queries successfully
 - No scoping errors with HybridQueryEngine
@@ -59,7 +59,7 @@ cd D:\DevTools\UE5-Source-Query\tests
 ### Test 2.1: Import Tests (Deployed)
 ```bash
 cd D:\UnrealProjects\5.3\hijack_prototype\Scripts
-.venv/Scripts/python.exe -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('.') / 'src')); from utils.config_manager import ConfigManager; print('PASS')"
+.venv/Scripts/python.exe -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('.') / 'ue5_query')); from utils.config_manager import ConfigManager; print('PASS')"
 ```
 **Result**: ✅ PASS - ConfigManager imports with relative path
 
@@ -82,7 +82,7 @@ engine = HybridQueryEngine(Path('.'))  # ✅ PASS
 ### Test 2.3: Definition Query (Deployed)
 ```bash
 cd D:\UnrealProjects\5.3\hijack_prototype\Scripts
-.venv/Scripts/python.exe src/utils/cli_client.py FHitResult --top-k 1 --no-server
+.venv/Scripts/python.exe ue5_query/utils/cli_client.py FHitResult --top-k 1 --no-server
 ```
 **Result**: ✅ PASS - Definition extraction working
 - Query type: definition (confidence: 0.85)
@@ -91,7 +91,7 @@ cd D:\UnrealProjects\5.3\hijack_prototype\Scripts
 
 ### Test 2.4: Vehicle-Specific Query (Deployed)
 ```bash
-.venv/Scripts/python.exe src/utils/cli_client.py "UChaosWheeledVehicleMovementComponent" --top-k 2 --no-server
+.venv/Scripts/python.exe ue5_query/utils/cli_client.py "UChaosWheeledVehicleMovementComponent" --top-k 2 --no-server
 ```
 **Result**: ✅ PASS - Vehicle physics query working
 - Query type: definition (confidence: 0.85)
@@ -103,7 +103,7 @@ cd D:\UnrealProjects\5.3\hijack_prototype\Scripts
 
 ### Test 2.5: Semantic Query (Deployed)
 ```bash
-.venv/Scripts/python.exe src/utils/cli_client.py "how does wheel physics work" --top-k 3 --no-server
+.venv/Scripts/python.exe ue5_query/utils/cli_client.py "how does wheel physics work" --top-k 3 --no-server
 ```
 **Result**: ✅ PASS - Semantic search working
 - Query type: semantic (confidence: 0.90)
@@ -126,15 +126,15 @@ from management.gui_dashboard import UnifiedDashboard
 ### Files Tested with Universal Imports:
 
 1. **config_manager.py** ✅
-   - Dev: `from src.utils.file_utils import atomic_write`
+   - Dev: `from ue5_query.utils.file_utils import atomic_write`
    - Deployed: `from utils.file_utils import atomic_write`
 
 2. **source_manager.py** ✅
-   - Dev: `from src.utils.file_utils import atomic_write`
+   - Dev: `from ue5_query.utils.file_utils import atomic_write`
    - Deployed: `from utils.file_utils import atomic_write`
 
 3. **engine_helper.py** ✅
-   - Dev: `from src.utils.environment_detector import get_detector`
+   - Dev: `from ue5_query.utils.environment_detector import get_detector`
    - Deployed: `from utils.environment_detector import get_detector`
 
 4. **cli_client.py** ✅
@@ -142,16 +142,16 @@ from management.gui_dashboard import UnifiedDashboard
    - Removed redundant import that caused scoping issue
 
 5. **hybrid_query.py** ✅
-   - Dev: `from src.utils.config_manager import ConfigManager`
+   - Dev: `from ue5_query.utils.config_manager import ConfigManager`
    - Deployed: `from utils.config_manager import ConfigManager`
 
 6. **gui_dashboard.py** ✅
-   - Dev: `from src.utils.* import ...`
+   - Dev: `from ue5_query.utils.* import ...`
    - Deployed: `from utils.* import ...`
    - All 6 imports working
 
 7. **build_embeddings.py** ✅
-   - Dev: `from src.utils.semantic_chunker import SemanticChunker`
+   - Dev: `from ue5_query.utils.semantic_chunker import SemanticChunker`
    - Deployed: `from utils.semantic_chunker import SemanticChunker`
 
 ---

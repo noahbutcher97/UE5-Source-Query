@@ -28,7 +28,7 @@ class HealthCheckResult:
 
 def get_script_root() -> Path:
     """Get the root directory of the installation"""
-    # This file is in src/utils/, so go up two levels
+    # This file is in ue5_query/utils/, so go up two levels
     return Path(__file__).parent.parent.parent
 
 

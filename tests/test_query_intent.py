@@ -2,9 +2,9 @@ import sys
 import unittest
 from pathlib import Path
 
-# Add src to path to allow imports without package installation
+# Add project root to path to allow imports without package installation
 TOOL_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(TOOL_ROOT / "src"))
+sys.path.insert(0, str(TOOL_ROOT))
 
 from ue5_query.core.query_intent import QueryIntentAnalyzer, QueryType, EntityType
 

@@ -36,9 +36,9 @@ REM Note: robocopy exit codes 0-7 are success, > 7 is error
 robocopy "%SCRIPT_DIR%installer" "%DIST_DIR%\installer" /E /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 echo Warning: Some installer files may not have copied
 
-REM Copy src (excluding research and deprecated PowerShell indexer)
-robocopy "%SCRIPT_DIR%src" "%DIST_DIR%\src" /E /XD research __pycache__ /XF BuildSourceIndex.ps1 BuildSourceIndexAdmin.bat /NFL /NDL /NJH /NJS
-if %ERRORLEVEL% GEQ 8 echo Warning: Some src files may not have copied
+REM Copy ue5_query (excluding research and deprecated PowerShell indexer)
+robocopy "%SCRIPT_DIR%ue5_query" "%DIST_DIR%\ue5_query" /E /XD research __pycache__ /XF BuildSourceIndex.ps1 BuildSourceIndexAdmin.bat /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 echo Warning: Some ue5_query files may not have copied
 
 robocopy "%SCRIPT_DIR%config" "%DIST_DIR%\config" .gitkeep /NFL /NDL /NJH /NJS 2>nul
 if %ERRORLEVEL% GEQ 8 mkdir "%DIST_DIR%\config"

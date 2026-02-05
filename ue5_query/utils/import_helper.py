@@ -18,10 +18,10 @@ def is_dev_environment():
     Returns:
         bool: True if in dev/git repo, False if in distributed package
     """
-    # Find the root directory (where this file's src/ parent is)
+    # Find the root directory (where this file's ue5_query/ parent is)
     current_file = Path(__file__).resolve()
 
-    # Go up: import_helper.py -> utils/ -> src/ -> root
+    # Go up: import_helper.py -> utils/ -> ue5_query/ -> root
     potential_root = current_file.parent.parent.parent
 
     # Dev/git indicators
@@ -67,7 +67,7 @@ def universal_import(module_path, names=None):
     """
     # Try absolute import first (dev environment)
     try:
-        full_path = f"src.{module_path}"
+        full_path = f"ue5_query.{module_path}"
         module = __import__(full_path, fromlist=names or [''])
 
         if names:
@@ -88,7 +88,7 @@ def try_import(absolute_path, relative_path, names):
     Try absolute import, fall back to relative.
 
     Args:
-        absolute_path (str): Absolute import like 'src.utils.file_utils'
+        absolute_path (str): Absolute import like 'ue5_query.utils.file_utils'
         relative_path (str): Relative import like 'utils.file_utils'
         names (list): Names to import from the module
 
@@ -97,7 +97,7 @@ def try_import(absolute_path, relative_path, names):
 
     Example:
         atomic_write, ensure_dir = try_import(
-            'src.utils.file_utils',
+            'ue5_query.utils.file_utils',
             'utils.file_utils',
             ['atomic_write', 'ensure_dir']
         )

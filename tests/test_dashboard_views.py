@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 import tkinter as tk
 
-# Add src to path
+# Add project root to path
 TOOL_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(TOOL_ROOT))
 

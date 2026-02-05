@@ -1,18 +1,3 @@
-# Project Structure & File Organization
-
-## Current Architecture (Phase 2 - Team Deployment Ready)
-
-### Design Philosophy
-
-**Core Principles:**
-1. **User-Facing Simplicity** - Single-click installers, clear entry points
-2. **Robust Validation** - Health checks at every critical step
-3. **Team-Ready** - Multiple UE5 versions, different machines, Git LFS support
-4. **Self-Healing** - Clear error messages with recovery paths
-5. **Professional Organization** - Dedicated directories for installers, utilities, documentation
-
----
-
 ## Directory Structure
 
 ```
@@ -39,13 +24,11 @@ D:\DevTools\UE5-Source-Query\
 │   ├── health-check.bat          ✅ System validation
 │   ├── rebuild-index.bat         🔄 Rebuild vector store
 │   ├── fix-paths.bat             🔧 Regenerate UE5 paths
-│   ├── check-paths.bat           🔍 Verify UE5 paths
 │   ├── setup-git-lfs.bat         📦 Git LFS configuration
 │   ├── serve.bat                 🌐 Start HTTP server
-│   ├── check_enrichment.py       🏷️ Verify metadata enrichment
 │   └── README.md                 📖 Tools documentation
 │
-├── 📁 src/ - Source Code
+├── 📁 ue5_query/ - Source Code
 │   │
 │   ├── 📁 core/ - Query Engine
 │   │   ├── hybrid_query.py              🔀 Main hybrid engine
@@ -53,8 +36,8 @@ D:\DevTools\UE5-Source-Query\
 │   │   ├── definition_extractor.py      🔍 Regex extraction
 │   │   ├── filtered_search.py           🎯 Metadata filtering
 │   │   ├── query_engine.py              🔎 Semantic search
-│   │   ├── batch_query.py               📦 Batch processing (Phase 4)
-│   │   ├── relationship_extractor.py    🔗 Relationship extraction (Phase 5)
+│   │   ├── batch_query.py               📦 Batch processing
+│   │   ├── relationship_extractor.py    🔗 Relationship extraction
 │   │   ├── filter_builder.py            🔧 Filter DSL builder
 │   │   ├── output_formatter.py          📄 Result formatting
 │   │   └── __init__.py
@@ -63,75 +46,45 @@ D:\DevTools\UE5-Source-Query\
 │   │   ├── build_embeddings.py         🏗️ Main indexer
 │   │   ├── detect_engine_path.py       🔍 UE5 path detection
 │   │   ├── metadata_enricher.py        🏷️ Entity tagging
-│   │   ├── EngineDirs.template.txt     📄 Path template (committed)
-│   │   ├── EngineDirs.txt              📄 Paths (machine-specific, gitignored)
-│   │   ├── EngineDirs.txt.example      📄 Example paths (reference)
-│   │   ├── BuildSourceIndex.ps1        🔧 PowerShell helper (deprecated)
-│   │   ├── BuildSourceIndexAdmin.bat   🔧 Admin launcher (deprecated)
+│   │   ├── EngineDirs.template.txt     📄 Path template
+│   │   ├── EngineDirs.txt              📄 Paths (machine-specific)
 │   │   └── __init__.py
 │   │
 │   ├── 📁 utils/ - Utilities & Helpers
-│   │   ├── verify_installation.py      ✅ Installation health checks
-│   │   ├── verify_vector_store.py      ✅ Vector store validation
-│   │   ├── semantic_chunker.py         ✂️ Code-aware chunking
 │   │   ├── config_manager.py           ⚙️ Configuration management
 │   │   ├── file_utils.py               📁 File operations
 │   │   ├── engine_helper.py            🎮 UE5 helper functions
 │   │   ├── source_manager.py           📂 Source directory manager
-│   │   ├── cli_client.py               💻 CLI client utilities
 │   │   ├── gpu_helper.py               🎮 GPU utilities
-│   │   ├── cuda_installer.py           🎮 CUDA installation helper
-│   │   ├── gui_theme.py                🎨 GUI theming
 │   │   └── __init__.py
 │   │
 │   ├── 📁 management/ - GUI Tools
-│   │   └── gui_dashboard.py            🖥️ Unified Dashboard (Phase 3)
+│   │   └── gui_dashboard.py            🖥️ Unified Dashboard
 │   │
-│   ├── 📁 server/ - HTTP API (Optional)
-│   │   ├── retrieval_server.py         🌐 REST API server
+│   ├── 📁 server/ - HTTP API
+│   │   ├── retrieval_server.py         🌐 REST API server (Migrating to FastAPI)
 │   │   └── __init__.py
 │   │
-│   └── 📁 research/ - Benchmarks (Optional)
+│   └── 📁 research/ - Benchmarks
 │       ├── model_benchmark.py          📊 Model testing
-│       ├── debug_semantic_search.py    🐛 Debugging tool
 │       └── __init__.py
 │
 ├── 📁 docs/ - Documentation
 │   │
-│   ├── 📁 Production/ - User Documentation
-│   │   ├── PROJECT_STRUCTURE.md         📋 This file
-│   │   ├── MAINTENANCE.md               🛠️ Maintenance guide
-│   │   ├── TROUBLESHOOTING.md           🔧 Error resolution
-│   │   │
-│   │   ├── 📁 Deployment/
-│   │   │   ├── DEPLOYMENT.md            📦 Deployment strategies
-│   │   │   └── TEAM_SETUP.md            👥 Team onboarding guide
-│   │   │
-│   │   ├── 📁 GPU/
-│   │   │   ├── GPU_SETUP.md             🎮 GPU configuration
-│   │   │   └── GPU_SUPPORT.md           🎮 GPU support details
-│   │   │
-│   │   ├── 📁 GUI/
-│   │   │   └── GUI_TOOLS.md             🖥️ GUI tool documentation
-│   │   │
-│   │   └── 📁 UsageGuide/
-│   │       ├── HYBRID_QUERY_GUIDE.md    📚 Query usage guide
-│   │       └── AI_AGENT_GUIDE.md        🤖 AI agent integration
+│   ├── 📁 user/ - User Documentation
+│   │   ├── getting_started.md           📋 User guide
+│   │   ├── troubleshooting.md           🔧 Error resolution
+│   │   ├── ai_integration.md           🤖 AI agent integration
+│   │   └── 📁 audits/                   📋 v2.1 Audit Reports
 │   │
-│   ├── 📁 Development/ - Development Documentation
-│   │   ├── 📁 ProjectAudits/
-│   │   │   ├── AUDIT_REPORT.md          📋 System audit
-│   │   │   ├── INTEGRATION_AUDIT.md     📋 Integration audit
-│   │   │   ├── IMPLEMENTATION_SUMMARY_20251202.md
-│   │   │   ├── REALITY_CHECK_AUDIT_20251202.md
-│   │   │   ├── PHASE2_FILTER_PARSER_20251202.md
-│   │   │   ├── PHASE3_GUI_FILTERS_20251202.md
-│   │   │   └── *.md                     📋 Other audits
-│   │   │
-│   │   └── 📁 ProjectPlans/
-│   │       ├── PHASE_5_RELATIONSHIP_EXTRACTION.md
-│   │       ├── PHASE_6_ENVIRONMENT_DETECTION.md
-│   │       └── *.md                     🗺️ Future plans
+│   ├── 📁 deployment/ - Deployment Documentation
+│   │   ├── maintenance.md               🛠️ Maintenance guide
+│   │   └── team_setup.md                👥 Team onboarding guide
+│   │
+│   ├── 📁 dev/ - Development Documentation
+│   │   ├── architecture.md              📋 This file
+│   │   ├── api_reference.md             📋 API Reference
+│   │   └── 📁 templates/
 │   │
 │   └── 📁 _archive/ - Archived Documentation
 │       ├── README.md                     📖 Archive index
@@ -143,22 +96,9 @@ D:\DevTools\UE5-Source-Query\
 │   └── batch_results.jsonl              📦 Example results
 │
 ├── 📁 config/ - Configuration
-│   └── .env                             🔐 API keys (gitignored)
-│
 ├── 📁 data/ - Vector Store
-│   ├── vector_store.npz                 💾 Embeddings (gitignored or LFS)
-│   ├── vector_meta.json                 📊 Metadata (gitignored or LFS)
-│   ├── vector_meta_enriched.json        🏷️ Enriched metadata (optional)
-│   └── 📁 archived/                     📦 Archived vector stores
-│
 ├── 📁 logs/ - Build Logs
-│   └── *.log                            📝 Operation logs
-│
-├── 📁 dist_temp/ - Temporary Distribution Files
-│   └── (temporary build artifacts)
-│
-└── 📁 tests/ - Test Suite (Empty - Future)
-    └── (placeholder)
+└── 📁 tests/ - Test Suite
 
 ```
 
@@ -184,14 +124,15 @@ D:\DevTools\UE5-Source-Query\
 | `installer/` | Deployment tools | Phase 2 |
 | `tools/` | Backend scripts | Phase 3 reorganization |
 | `examples/` | Example batch queries | Phase 4 |
-| `src/core/batch_query.py` | Batch processing | Phase 4 |
-| `src/core/relationship_extractor.py` | Relationship extraction | Phase 5 |
-| `src/core/filter_builder.py` | Filter DSL | Phase 2 |
-| `src/core/output_formatter.py` | Result formatting | Phase 3 |
-| `src/management/gui_dashboard.py` | Unified Dashboard | Phase 3 |
-| `src/utils/source_manager.py` | Source directory manager | Phase 3 |
-| `docs/Production/` | Organized production docs | Current |
-| `docs/Development/` | Development docs & audits | Current |
+| `ue5_query/core/batch_query.py` | Batch processing | Phase 4 |
+| `ue5_query/core/relationship_extractor.py` | Relationship extraction | Phase 5 |
+| `ue5_query/core/filter_builder.py` | Filter DSL | Phase 2 |
+| `ue5_query/core/output_formatter.py` | Result formatting | Phase 3 |
+| `ue5_query/management/gui_dashboard.py` | Unified Dashboard | Phase 3 |
+| `ue5_query/utils/source_manager.py` | Source directory manager | Phase 3 |
+| `docs/user/` | Organized user docs | Current |
+| `docs/deployment/` | Deployment strategies | Current |
+| `docs/dev/` | Development docs & audits | Current |
 | `docs/_archive/` | Archived obsolete docs | Current |
 
 ### ✅ Keep - Advanced Features
@@ -200,26 +141,22 @@ D:\DevTools\UE5-Source-Query\
 |------|---------|--------|
 | `tools/setup-git-lfs.bat` | Team LFS setup | ✅ Team deployment |
 | `tools/serve.bat` | HTTP server | ✅ Optional feature |
-| `tools/check-paths.bat` | Path verification | ✅ Diagnostics |
-| `tools/check_enrichment.py` | Metadata verification | ✅ Diagnostics |
 | `create_dist.bat` | Distribution packaging | ✅ Deployment |
 
 ### ⚠️ Optional - Development/Research
 
 | Directory | Purpose | Recommendation |
 |-----------|---------|----------------|
-| `src/research/` | Model benchmarks | Keep for reference |
-| `src/server/` | HTTP API | Optional feature |
+| `ue5_query/research/` | Model benchmarks | Keep for reference |
+| `ue5_query/server/` | HTTP API | Active feature (v2.1 target) |
 | `logs/` | Build logs | Keep (in .gitignore) |
-| `tests/` | Test suite | Keep (for future) |
-| `dist_temp/` | Temp distribution files | Keep (in .gitignore) |
+| `tests/` | Test suite | High priority for v2.1 |
 
 ### 🔄 Deprecated But Kept For Compatibility
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `src/indexing/BuildSourceIndex.ps1` | PowerShell indexer | ⚠️ Deprecated, use Python |
-| `src/indexing/BuildSourceIndexAdmin.bat` | Admin launcher | ⚠️ Deprecated |
+| `ue5_query/indexing/BuildSourceIndex.ps1` | PowerShell indexer | ⚠️ Deprecated, use Python |
 
 ### ✅ All Files Serve Current Architecture
 
@@ -241,8 +178,9 @@ After reorganization audit, all files serve a purpose aligned with Phase 1-5 imp
 - **Benefit:** One-stop shop for all user interactions
 
 ### 3. Organized Documentation Structure
-- **docs/Production/**: User-facing docs (deployment, usage, troubleshooting)
-- **docs/Development/**: Development docs (audits, plans)
+- **docs/user/**: User-facing docs (usage, troubleshooting, agents)
+- **docs/deployment/**: Admin-facing docs (maintenance, team setup)
+- **docs/dev/**: Development docs (audits, plans, architecture)
 - **docs/_archive/**: Obsolete/superseded documentation
 - **Benefit:** Clear separation of concerns, easier navigation
 
@@ -260,7 +198,7 @@ After reorganization audit, all files serve a purpose aligned with Phase 1-5 imp
 ### 6. Team Deployment Support (Phase 2)
 - **Path Strategy:** Template → per-machine generation
 - **Vector Store:** Build-per-machine OR Git LFS
-- **Documentation:** TEAM_SETUP.md, TROUBLESHOOTING.md
+- **Documentation:** team_setup.md, troubleshooting.md
 - **Benefit:** Multiple UE5 versions, different drive letters
 
 ### 7. Batch Query Processing (Phase 4)
@@ -309,11 +247,18 @@ After reorganization audit, all files serve a purpose aligned with Phase 1-5 imp
 - Dependency mapping
 - Enhanced AI agent context
 
+### v2.1 Infrastructure (Post-Audit)
+- **FastAPI Migration**: Async server
+- **SQLite Migration**: Relational metadata
+- **Redis Caching**: Semantic result caching
+- **Celery Integration**: Background indexing
+
 ### Key Reorganization Changes
 
 **Documentation Reorganization:**
-- Old scattered docs → `docs/Production/` (user docs)
-- Development docs → `docs/Development/ProjectAudits/` and `ProjectPlans/`
+- User docs → `docs/user/`
+- Admin docs → `docs/deployment/`
+- Development docs → `docs/dev/`
 - Obsolete plans → `docs/_archive/`
 
 **Tools Reorganization:**
@@ -321,27 +266,12 @@ After reorganization audit, all files serve a purpose aligned with Phase 1-5 imp
 - `launcher.bat` remains in root as main entry point
 - Clean root with only essential entry points
 
-**Added Directories:**
-- `examples/` - Batch query examples
-- `tools/` - Backend scripts
-- `dist_temp/` - Temporary distribution files
-
-### Backward Compatibility
-
-✅ All existing scripts still work
-✅ Query interface unchanged (`ask.bat`)
-✅ No breaking changes to API
-✅ Existing .env files and vector stores compatible
-✅ Old batch files still work, just moved to `tools/`
-
----
-
-## Best Practices
+### Best Practices
 
 ### For Developers
 
 **Commit:**
-- All source code (`src/`)
+- All source code (`ue5_query/`)
 - Documentation (`docs/`)
 - Templates (`*.template.txt`)
 - Entry scripts (`*.bat`)
@@ -350,46 +280,31 @@ After reorganization audit, all files serve a purpose aligned with Phase 1-5 imp
 **Never Commit:**
 - `.venv/` - Virtual environment
 - `config/.env` - API keys
-- `src/indexing/EngineDirs.txt` - Machine-specific
+- `ue5_query/indexing/EngineDirs.txt` - Machine-specific
 - `data/vector_store.npz` - Unless using Git LFS
 - `logs/*.log` - Build logs
-
-### For Team Leads
-
-**Setup Once:**
-1. Decide: Build-per-machine OR Git LFS
-2. Update .gitignore strategy if using LFS
-3. Run `setup-git-lfs.bat` if LFS chosen
-4. Document in team README
-
-**Onboarding New Members:**
-1. Point them to `docs/TEAM_SETUP.md`
-2. Have them double-click `install.bat`
-3. Verify with `health-check.bat`
 
 ---
 
 ## Future Enhancements
 
-**Not Implemented Yet (From DEFERRED_TASKS.md):**
+**v2.1 Targets:**
 - Automated testing framework (`tests/`)
 - Continuous benchmarking
-- Web interface alternative to ask.bat
-- VS Code extension
-
-**These are intentionally deferred** - focus is on deployment robustness first.
+- FastAPI REST interface
+- Dockerized deployment
 
 ---
 
 ## Summary
 
-✅ **Clean architecture** - Every file serves Phase 1-5 implementation
-✅ **Organized structure** - Clear separation: Production/Development/Archive docs
+✅ **Clean architecture** - Every file serves current implementation
+✅ **Organized structure** - Clear separation: User/Deployment/Dev/Archive docs
 ✅ **Unified interface** - Single Dashboard for all operations
 ✅ **Team-ready** - Full deployment infrastructure with health checks
-✅ **Feature-complete** - Phases 1-5 complete (Query, Filters, GUI, Batch, Relationships)
-✅ **Well-documented** - Organized docs for users and developers
+✅ **Feature-complete** - Phases 1-5 complete
+✅ **Well-documented** - Organized docs for all personas
 
-**Current State:** Production-ready with Phase 1-5 complete. Phase 6 (Environment Detection) planned.
+**Current State:** v2.1 foundations in progress. Phase 1-5 complete.
 
-**Next Phase:** Phase 6 - Environment Detection (see `docs/Development/ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md`)
+**Next Phase:** Phase 6 - Environment Detection (see `docs/dev/ProjectPlans/PHASE_6_ENVIRONMENT_DETECTION.md`)

@@ -42,9 +42,9 @@ _FALLBACK_DEFAULT = [
 ]
 
 _FALLBACK_DEPLOYMENT = [
-    "src/research", "src/research/**",
+    "ue5_query/research", "ue5_query/research/**",
     "docs/_archive", "docs/_archive/**",
-    "src/indexing/BuildSourceIndex.ps1", "src/indexing/BuildSourceIndexAdmin.bat",
+    "ue5_query/indexing/BuildSourceIndex.ps1", "ue5_query/indexing/BuildSourceIndexAdmin.bat",
     "tests/DEPLOYMENT_TEST_RESULTS.md", "tools/setup-git-lfs.bat",
     "CLAUDE.md", "GEMINI.md",
 ]
@@ -209,7 +209,7 @@ def get_git_hash(root: Path) -> str:
     return "unknown"
 
 def get_version(root: Path) -> Optional[str]:
-    """Get version from ue5_query/__init__.py or src/__init__.py"""
+    """Get version from ue5_query/__init__.py"""
     try:
         # Check new structure first
         init_file = root / "ue5_query" / "__init__.py"
@@ -427,14 +427,14 @@ class UpdateManager:
                     self._safe_remove_dir(dst_dir)
 
                 # Filter exclusion patterns for this directory
-                # Convert "src/research" → "research" when syncing src/
+                # Convert "ue5_query/research" → "research" when syncing ue5_query/
                 dir_specific_patterns = []
                 for pattern in exclude_patterns:
                     if "/" in pattern or "\\" in pattern:
                         # Path-based pattern - check if it applies to this directory
                         norm_pattern = pattern.replace("\\", "/")
                         if norm_pattern.startswith(f"{dir_name}/"):
-                            # Strip directory prefix: "src/research" → "research"
+                            # Strip directory prefix: "ue5_query/research" → "research"
                             relative_pattern = norm_pattern[len(dir_name)+1:]
                             dir_specific_patterns.append(relative_pattern)
                     else:
@@ -535,14 +535,14 @@ class UpdateManager:
                         self._safe_remove_dir(dst_dir)
 
                     # Filter exclusion patterns for this directory
-                    # Convert "src/research" → "research" when syncing src/
+                    # Convert "ue5_query/research" → "research" when syncing ue5_query/
                     dir_specific_patterns = []
                     for pattern in exclude_patterns:
                         if "/" in pattern or "\\" in pattern:
                             # Path-based pattern - check if it applies to this directory
                             norm_pattern = pattern.replace("\\", "/")
                             if norm_pattern.startswith(f"{dir_name}/"):
-                                # Strip directory prefix: "src/research" → "research"
+                                # Strip directory prefix: "ue5_query/research" → "research"
                                 relative_pattern = norm_pattern[len(dir_name)+1:]
                                 dir_specific_patterns.append(relative_pattern)
                         else:

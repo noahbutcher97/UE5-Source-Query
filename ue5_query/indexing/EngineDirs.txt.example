@@ -82,7 +82,7 @@ C:\Program Files\Epic Games\UE_5.3\Engine\Source\Runtime\Experimental\ChaosVehic
 #    # C:\...\Engine\Source\Runtime\Engine\Classes\AI
 #
 # 2. To add more directories: Edit the template and regenerate
-#    File: src\indexing\EngineDirs.template.txt
+#    File: ue5_query\indexing\EngineDirs.template.txt
 #    Then run: fix-paths.bat
 #
 # 3. Common additions for full coverage:

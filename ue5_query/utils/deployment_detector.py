@@ -245,7 +245,7 @@ class DeploymentDetector:
         Looks for:
         - .git/ (dev repo marker)
         - .ue5query_deploy.json (deployment marker)
-        - src/core/hybrid_query.py (both)
+        - ue5_query/core/hybrid_query.py (both)
 
         Returns:
             Path to project root, or start_path if not found

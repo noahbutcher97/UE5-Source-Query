@@ -13,24 +13,34 @@ from pathlib import Path
 
 # Add parent to path for imports
 TOOL_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(TOOL_ROOT / "src"))
+sys.path.insert(0, str(TOOL_ROOT))
 
 from ue5_query.core.hybrid_query import HybridQueryEngine
 
-# Global engine instance
+# Global state
 engine: HybridQueryEngine | None = None
+init_error: str | None = None
 
 class SearchHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             parsed = urlparse(self.path)
             
+            # --- Endpoints that work even if Engine failed ---
+            
             if parsed.path == "/health":
-                return self._json({
-                    "status": "ok", 
-                    "model": engine.embed_model_name,
-                    "index_chunks": len(engine.meta) if engine.meta else 0
-                })
+                if engine:
+                    return self._json({
+                        "status": "ok", 
+                        "model": engine.embed_model_name,
+                        "index_chunks": len(engine.meta) if engine.meta else 0
+                    })
+                else:
+                    return self._json({
+                        "status": "degraded",
+                        "error": init_error,
+                        "message": "Engine failed to initialize. Check /config or logs."
+                    }, code=503)
             
             elif parsed.path == "/config":
                 from ue5_query.utils.agent_introspect import get_agent_config_data
@@ -40,7 +50,15 @@ class SearchHandler(BaseHTTPRequestHandler):
                 from ue5_query.core.hybrid_query import get_tool_schema
                 return self._json(get_tool_schema())
 
+            # --- Endpoints requiring Engine ---
+
             elif parsed.path == "/search":
+                if not engine:
+                    return self._json({
+                        "error": "Engine not ready",
+                        "details": init_error
+                    }, code=503)
+
                 qs = parse_qs(parsed.query)
                 
                 # Parse parameters
@@ -87,23 +105,27 @@ def serve(host: str, port: int):
     print("[INFO] Loading models and index (this may take a few seconds)...")
     
     # Initialize engine (loads heavy resources once)
-    global engine
+    global engine, init_error
     try:
         engine = HybridQueryEngine(TOOL_ROOT)
         print(f"[INFO] Engine ready. Using model: {engine.embed_model_name}")
     except Exception as e:
-        print(f"[FATAL] Failed to initialize engine: {e}")
-        sys.exit(1)
+        init_error = str(e)
+        print(f"[WARN] Failed to initialize engine: {e}")
+        print(f"[WARN] Server starting in DEGRADED mode. Search will be unavailable.")
 
-    server = ThreadingHTTPServer((host, port), SearchHandler)
-    print(f"[INFO] Ready to accept queries.")
-    
     try:
+        server = ThreadingHTTPServer((host, port), SearchHandler)
+        print(f"[INFO] Ready to accept queries.")
         server.serve_forever()
+    except OSError as e:
+        print(f"[FATAL] Could not bind to port {port}: {e}")
+        sys.exit(1)
     except KeyboardInterrupt:
         print("\n[INFO] Server stopping...")
     finally:
-        server.server_close()
+        if 'server' in locals():
+            server.server_close()
 
 def main():
     ap = argparse.ArgumentParser()

@@ -52,9 +52,8 @@ def get_project_logger(name: str) -> logging.Logger:
     """
     Get a logger configured for the project, automatically finding the logs directory.
     """
-    # Determine project root (relative to this file in src/utils/logger.py)
-    # src/utils/logger.py -> src/utils -> src -> ROOT
-    root_dir = Path(__file__).parent.parent.parent
+    # Determine project root (relative to this file in ue5_query/utils/logger.py)
+    # ue5_query/utils/logger.py -> ue5_query/utils -> ue5_query -> ROOT    root_dir = Path(__file__).parent.parent.parent
     log_dir = root_dir / "logs"
     
     # Create logs directory if it doesn't exist

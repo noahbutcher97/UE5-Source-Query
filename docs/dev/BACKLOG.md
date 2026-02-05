@@ -87,7 +87,7 @@ D:\DevTools\UE5-Source-Query\data\
 STORES = {
     "engine": {
         "data_dir": Path("data/engine"),
-        "sources": "src/indexing/EngineDirs.txt",
+        "sources": "ue5_query/indexing/EngineDirs.txt",
         "extensions": {".cpp", ".h", ".hpp", ".inl"}
     },
     "project": {

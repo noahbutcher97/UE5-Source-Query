@@ -59,7 +59,7 @@ def run_all_tests():
         test_suites.append(("System Health", "FAIL"))
 
     # 2. Vector Store Validation
-    print("[2/6] Running vector store validation...")
+    print("[2/7] Running vector store validation...")
     try:
         result = subprocess.run(
             [sys.executable, "-m", "ue5_query.utils.verify_vector_store"],
@@ -89,7 +89,7 @@ def run_all_tests():
         test_suites.append(("Vector Store", "FAIL"))
 
     # 3. Deployment Detection Tests
-    print("[3/6] Running deployment detection tests...")
+    print("[3/7] Running deployment detection tests...")
     try:
         test_file = SCRIPT_DIR / "tests" / "test_deployment_detection.py"
         if test_file.exists():
@@ -118,7 +118,7 @@ def run_all_tests():
         test_suites.append(("Deployment Detection", "FAIL"))
 
     # 4. Update Integration Tests
-    print("[4/6] Running update integration tests...")
+    print("[4/7] Running update integration tests...")
     try:
         test_file = SCRIPT_DIR / "tests" / "test_update_integration.py"
         if test_file.exists():
@@ -147,7 +147,7 @@ def run_all_tests():
         test_suites.append(("Update Integration", "FAIL"))
 
     # 5. GUI Smoke Test
-    print("[5/6] Running GUI smoke test...")
+    print("[5/7] Running GUI smoke test...")
     try:
         test_file = SCRIPT_DIR / "tests" / "test_gui_smoke.py"
         if test_file.exists():
@@ -176,7 +176,7 @@ def run_all_tests():
         test_suites.append(("GUI Smoke", "FAIL"))
 
     # 6. Module Import Tests
-    print("[6/6] Running module import smoke test...")
+    print("[6/7] Running module import smoke test...")
     try:
         print("Testing core module imports...")
 
@@ -217,6 +217,35 @@ def run_all_tests():
         print(f"[FAILED] Module import test failed: {e}\n")
         total_failed += 1
         test_suites.append(("Module Imports", "FAIL"))
+
+    # 7. Agent Integration Tests
+    print("[7/7] Running agent integration tests...")
+    try:
+        result = subprocess.run(
+            [sys.executable, "tests/test_agent_integration.py"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(SCRIPT_DIR)
+        )
+        if result.returncode == 0:
+            print("[SUCCESS] Agent integration tests passed\n")
+            total_passed += 1
+            test_suites.append(("Agent Integration", "PASS"))
+        else:
+            print(result.stdout)
+            print(result.stderr)
+            print("[FAILED] Agent integration tests failed\n")
+            total_failed += 1
+            test_suites.append(("Agent Integration", "FAIL"))
+    except subprocess.TimeoutExpired:
+        print("[FAILED] Agent integration tests timed out\n")
+        total_failed += 1
+        test_suites.append(("Agent Integration", "FAIL"))
+    except Exception as e:
+        print(f"[FAILED] Agent integration tests failed: {e}\n")
+        total_failed += 1
+        test_suites.append(("Agent Integration", "FAIL"))
 
     # Summary
     print()

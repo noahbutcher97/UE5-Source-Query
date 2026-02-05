@@ -80,21 +80,15 @@ import sys
 from pathlib import Path
 
 # Add Scripts to path
-sys.path.insert(0, str(Path("Scripts/src")))
+sys.path.insert(0, str(Path("Scripts")))
 
-from core.hybrid_query import HybridQueryEngine
+from ue5_query.core.hybrid_query import HybridQueryEngine
 
 # Initialize engine
 engine = HybridQueryEngine(Path("Scripts"))
 
 # Query
 results = engine.query("FHitResult members", top_k=5)
-
-# Results contain:
-# - results.query_type (DEFINITION, SEMANTIC, HYBRID)
-# - results.definition_results (if applicable)
-# - results.semantic_results (if applicable)
-# - results.merged_results (combined & ranked)
 ```
 
 #### Method 3: Unified Dashboard (For Interactive Exploration)
@@ -224,12 +218,12 @@ Scripts\tools\health-check.bat
 ```
 
 **Troubleshooting:**
-See `Scripts/docs/Production/TROUBLESHOOTING.md`
+See `Scripts/docs/user/troubleshooting.md`
 
 ### Performance Notes
 
 - **Query Speed:** 0.3-1.4s depending on query type
-- **Index Size:** 52.1 MB (loaded on first query)
+- **Index Size:** ~50-80 MB (loaded on first query)
 - **GPU Acceleration:** Automatic if NVIDIA GPU present
 - **Cache:** Results cached in memory after first use
 
