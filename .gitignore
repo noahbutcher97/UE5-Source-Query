@@ -30,6 +30,8 @@ __pycache__/
 # Strategy A (Default): Ignore vector store - build per-machine
 data/vector_store.npz
 data/vector_meta.json
+data/ue5_query.db
+data/*.db
 data/*_enriched.json
 data/vector_cache.json
 
@@ -89,3 +91,4 @@ nul
 
 .gemini/
 gha-creds-*.json
+data/ue5_query.db 

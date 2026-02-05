@@ -1,4 +1,4 @@
 """Core query and extraction functionality"""
-from .definition_extractor import DefinitionExtractor, DefinitionResult
+from ue5_query.core.definition_extractor import DefinitionExtractor, DefinitionResult
 
 __all__ = ['DefinitionExtractor', 'DefinitionResult']

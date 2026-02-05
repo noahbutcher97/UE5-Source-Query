@@ -1,5 +1,12 @@
 # UE5.3 Vector Search System - Python Dependencies
 
+# v2.1 Infrastructure & Asynchronous layer
+fastapi>=0.100.0
+uvicorn>=0.22.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+redis>=4.6.0
+
 # Core dependencies
 sentence-transformers>=2.2.0  # Semantic embedding model
 anthropic>=0.7.0              # Claude API client (optional for natural language answers)
