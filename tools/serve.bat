@@ -1,39 +1,33 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal enabledelayedexpansion
 
 REM ====================================================================
-REM UE5 Source Query Tool - Search Server
-REM Starts the persistent search server for instant queries.
+REM UE5 Source Query - Async Server Launcher (v2.1)
 REM ====================================================================
 
-set "SCRIPT_DIR=%~dp0"
-set "TOOL_ROOT=%SCRIPT_DIR%.."
+cd /d "%~dp0\.."
 
-echo.
-echo ====================================================================
-echo Starting Search Server...
-echo ====================================================================
-echo.
-
-REM Check if .env exists
-if not exist "%TOOL_ROOT%\config\.env" (
-    echo [ERROR] Configuration not found: config\.env
-    echo Please run Setup.bat first.
+REM 1. Environment Check
+if not exist ".venv\Scripts\python.exe" (
+    echo [ERROR] Virtual environment missing. Run launcher.bat first.
+    pause
     exit /b 1
 )
 
-REM Check venv
-if not exist "%TOOL_ROOT%\.venv\Scripts\python.exe" (
-    echo [ERROR] Virtual environment not found.
-    echo Please run Setup.bat first.
-    exit /b 1
-)
+REM 2. Port and Host Config
+set HOST=127.0.0.1
+set PORT=8000
 
-REM Launch server
-echo [*] Initializing engine (this takes 5-10 seconds)...
-echo [*] Press Ctrl+C to stop the server.
+echo [INFO] Starting Asynchronous API Server...
+echo [INFO] Host: %HOST%
+echo [INFO] Port: %PORT%
+echo [INFO] Documentation: http://%HOST%:%PORT%/docs
 echo.
 
-"%TOOL_ROOT%\.venv\Scripts\python.exe" -m ue5_query.server.retrieval_server --host 127.0.0.1 --port 8765
+".venv\Scripts\python.exe" -m uvicorn ue5_query.server.app:app --host %HOST% --port %PORT% --log-level info
 
-pause
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Server failed to start.
+    pause
+)

@@ -43,7 +43,7 @@ class SemanticSearchEngine:
         return self._model
 
     def load_embeddings(self):
-        """Load embeddings into memory (synchronous, typically done at startup)"""
+        """Load embeddings into memory and initialize the model weights."""
         if not self.vector_path.exists():
             raise FileNotFoundError(f"Vector store missing at {self.vector_path}")
         
@@ -52,6 +52,11 @@ class SemanticSearchEngine:
         data = np.load(self.vector_path, mmap_mode="r", allow_pickle=False)
         self._embeddings = data["embeddings"]
         logger.info(f"Loaded {len(self._embeddings)} embeddings.")
+        
+        # Eagerly load model to avoid first-query latency
+        logger.info(f"Eagerly loading embedding model: {self.model_name}...")
+        self._get_model()
+        logger.info("Model weights loaded.")
 
     async def embed_query(self, query_text: str) -> np.ndarray:
         """Embed a query string using the model (run in thread pool to avoid blocking)"""

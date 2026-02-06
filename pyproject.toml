@@ -35,7 +35,15 @@ dev = [
 ue5-query = "ue5_query.core.hybrid_query:main"
 ue5-dashboard = "ue5_query.management.gui_dashboard:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["ue5_query*"]
-namespaces = true
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.coverage.run]
+source = ["ue5_query"]
+omit = ["tests/*", "**/__init__.py", "ue5_query/server/retrieval_server.py"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
